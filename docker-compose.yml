@@ -1,0 +1,76 @@
+# Neutral base stack for mAPI-ng: the server (dashboard + ingest), the data plane
+# (ClickHouse) and the control plane (Postgres). No host ports or routing here —
+# overlays add those:
+#   docker-compose.local.yml -> laptop: publishes host ports, dev config
+#   docker-compose.prod.yml  -> production: publishes only the server port
+# Started via `make local` / `make up` (both pass --env-file .env).
+services:
+  maping-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      MAPING_LISTEN: ":8080"
+      # Point the server at the compose service names (not the host ports).
+      MAPING_CLICKHOUSE_DSN: ${MAPING_CLICKHOUSE_DSN:-clickhouse://maping:maping@clickhouse:9000/maping}
+      # Empty -> auth off (single dev tenant). Set in .env to enable the control plane.
+      MAPING_POSTGRES_DSN: ${MAPING_POSTGRES_DSN:-}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: ${MAPING_CH_DB:-maping}
+      CLICKHOUSE_USER: ${MAPING_CH_USER:-maping}
+      CLICKHOUSE_PASSWORD: ${MAPING_CH_PASSWORD:-maping}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    networks:
+      - default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${MAPING_PG_DB:-maping}
+      POSTGRES_USER: ${MAPING_PG_USER:-maping}
+      POSTGRES_PASSWORD: ${MAPING_PG_PASSWORD:-maping}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MAPING_PG_USER:-maping} -d ${MAPING_PG_DB:-maping}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  clickhouse-data:
+  postgres-data:

@@ -1,0 +1,19 @@
+# Laptop overlay: publish host ports and use development config. Auth is off
+# unless you set MAPING_POSTGRES_DSN in .env.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+services:
+  maping-server:
+    ports:
+      - "${MAPING_PORT:-8080}:8080"
+    environment:
+      MAPING_BASE_URL: http://localhost:${MAPING_PORT:-8080}
+
+  clickhouse:
+    ports:
+      - "${MAPING_CH_HTTP_PORT:-8123}:8123"     # HTTP interface
+      - "${MAPING_CH_NATIVE_PORT:-9000}:9000"   # native protocol
+
+  postgres:
+    ports:
+      # Host 15432 by default to avoid clashing with a local Postgres on 5432.
+      - "${MAPING_PG_PORT:-15432}:5432"

@@ -1,0 +1,15 @@
+# Local environment (copy from env.sample)
+/.env
+
+# Build output
+/bin/
+# Compiled example app (built from example/main.go)
+/example/example
+
+# Go test / coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Claude Code local workspace — never tracked (settings, docs, changelog)
+/.claude/

@@ -1,0 +1,19 @@
+mAPI-ng is an open-core project. It is NOT covered by a single license: each
+Go module in this repository carries its own LICENSE file, and that per-module
+license is authoritative. See docs/adr/0004-open-core-licensing.md for the
+rationale.
+
+  Module                                  Path        License
+  --------------------------------------  ----------  ------------------------
+  github.com/arhuman/maping/proto         proto/      MIT
+  github.com/arhuman/maping/client        client/     MIT
+  github.com/arhuman/maping/client/gin    client/gin/ MIT
+  github.com/arhuman/maping/server        server/     Business Source License 1.1
+  github.com/arhuman/maping/example       example/    MIT
+
+The client (and its adapters) and the shared proto module are MIT so they are
+safe to import into production services. The server is source-available under
+BSL 1.1 (self-hostable for non-competing use, converting to Apache 2.0 per its
+Change Date). Refer to each module's LICENSE file for the exact terms.
+
+Copyright (c) 2026 Arnaud ASSAD

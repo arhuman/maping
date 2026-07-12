@@ -1,0 +1,10 @@
+# Production overlay: publish only the server port; ClickHouse and Postgres stay
+# internal to the compose network. Front it with your own TLS-terminating
+# reverse proxy and set MAPING_BASE_URL to the public https URL.
+# Fill MAPING_POSTGRES_DSN + MAPING_SESSION_KEY + OIDC creds in .env first.
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+  maping-server:
+    ports:
+      - "${MAPING_PORT:-8080}:8080"
+    restart: always

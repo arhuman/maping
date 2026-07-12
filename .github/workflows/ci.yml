@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Unit gate: the same `make test` developers run locally (race + short + cover
+  # across every go.work module: proto, client, client/gin, server). Matrix covers
+  # the go.mod floor and the latest stable Go (security patches).
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.26.5", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+      - name: Build server binary
+        run: make build
+      - name: Test (race + short + cover, all modules)
+        run: make test
+
+  # Convention gate: Conventional Commits on every PR commit, making the
+  # CONTRIBUTING claim ("commit messages are linted") true in CI instead of
+  # relying on a maintainer-local commitlint. Dependency-free: a regex over the
+  # PR range, so a pure-Go repo stays pure-Go. Merge commits are exempt.
+  commitlint:
+    name: commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Conventional Commits on PR commits
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9/_.-]+\))?(!)?: .+'
+          fail=0
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            subject=$(git log -1 --format=%s "$sha")
+            if ! printf '%s' "$subject" | grep -qE "$pattern"; then
+              echo "::error::commit $sha is not Conventional Commits: '$subject'"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # License-map gate: keeps the open-core license map honest. Every Go module
+  # (each go.mod directory) must ship its own LICENSE file and be listed in the
+  # README license table. Prevents a module shipping unlicensed or undocumented
+  # (the drift that left example/ without a LICENSE despite the README map).
+  license:
+    name: license map
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every module has a LICENSE and a README license-table row
+        run: |
+          set -euo pipefail
+          fail=0
+          for m in $(find . -name go.mod -not -path './vendor/*' | sed 's#^\./##; s#/go.mod$##'); do
+            if [ ! -f "$m/LICENSE" ]; then
+              echo "::error file=$m::module '$m' has no LICENSE file"
+              fail=1
+            fi
+            if ! grep -Fq "| \`$m\` |" README.md; then
+              echo "::error::module '$m' is not listed in the README license table"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # Quality gate: the same `make audit` developers run locally (go mod verify +
+  # golangci-lint with the repo's 10x thresholds + govulncheck, per module).
+  # Tools are pre-installed at the pinned versions so `make audit` reuses them
+  # instead of bootstrapping `make tools`.
+  lint:
+    name: lint + vuln
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install golangci-lint (pinned)
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Audit (verify + lint + vuln, all modules)
+        run: make audit
+
+  # Integration gate: exercises the real ClickHouse writer/query layer and the
+  # Postgres-backed control-plane store (the `//go:build integration` tests)
+  # against live instances, so both critical paths are covered automatically.
+  integration:
+    name: integration (clickhouse + postgres)
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: maping
+          CLICKHOUSE_USER: maping
+          CLICKHOUSE_PASSWORD: maping
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 9000:9000
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: maping
+          POSTGRES_USER: maping
+          POSTGRES_PASSWORD: maping
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U maping -d maping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Storage and control-plane integration tests
+        # Run the same target developers use locally (make integration) so CI and
+        # local never drift. The target honours these explicitly-set DSNs: in CI
+        # both services are on localhost (postgres 5432, clickhouse 9000 per the
+        # service port maps above), whereas locally the target derives the host
+        # ports from .env (MAPING_PG_PORT=15432). One command, one code path.
+        env:
+          MAPING_CLICKHOUSE_DSN: clickhouse://maping:maping@localhost:9000/maping
+          MAPING_POSTGRES_DSN: postgres://maping:maping@localhost:5432/maping?sslmode=disable
+        run: make integration

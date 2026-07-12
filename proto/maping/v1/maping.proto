@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+// Package maping.v1 is the mAPI-ng ingest wire contract.
+//
+// This schema is a PUBLIC, STABLE contract: the client library is open source
+// (MIT, ADR-0004), so third parties may build against it. Evolve it
+// backward-compatibly only — `buf breaking` is enforced in CI from commit 1.
+// The DDSketch bucket layout (gamma/offset) is frozen and versioned by
+// sketch_format_version; see ADR-0001 and ADR-0003.
+package maping.v1;
+
+option go_package = "github.com/arhuman/maping/proto/maping/v1;mapingv1";
+
+// StatusClass is the HTTP status bucket used as a series-key dimension.
+// Exact codes live in Summary.status_code_breakdown, never as a series label.
+enum StatusClass {
+  // STATUS_CLASS_UNSPECIFIED must never be sent; it guards proto3 default-zero.
+  STATUS_CLASS_UNSPECIFIED = 0;
+  STATUS_CLASS_2XX = 1;
+  STATUS_CLASS_3XX = 2;
+  STATUS_CLASS_4XX = 3;
+  STATUS_CLASS_5XX = 4;
+  // STATUS_CLASS_NO_STATUS covers write-timeouts / requests aborted before a
+  // status was written. Counted as an error, tracked separately (docs/context.md).
+  STATUS_CLASS_NO_STATUS = 5;
+}
+
+// Envelope carries source identity and is sent once per upload batch.
+message Envelope {
+  string service = 1;                 // logical app name (auto-derived)
+  string instance = 2;                // replica id (auto-derived)
+  string sdk_version = 3;             // client SDK version, for compat handling
+  // sketch_format_version identifies the DDSketch bucket layout so the server
+  // can reject sketches it cannot interpret rather than corrupt percentiles.
+  uint32 sketch_format_version = 4;
+  // dropped_summaries counts Summaries dropped by client backpressure since the
+  // last successful upload, so the gap is visible rather than silent.
+  uint64 dropped_summaries = 5;
+}
+
+// Summary is one client-side aggregate for a single (endpoint, status-class)
+// over one flush window. It is the unit of data mAPI-ng ships (no per-request
+// events in v1).
+message Summary {
+  int64 window_start_ms = 1;          // client wall clock, window start
+  int64 window_end_ms = 2;            // client wall clock, window end
+  string method = 3;                  // HTTP method
+  string route_template = 4;          // registered route template, never raw path
+  StatusClass status_class = 5;
+  uint64 count = 6;                   // requests in window (gives rate)
+  uint64 sum_duration_ns = 7;         // for an exact mean alongside sketch percentiles
+  uint64 req_bytes = 8;               // summed request bytes (bandwidth per endpoint)
+  uint64 resp_bytes = 9;              // summed response bytes
+  // latency_sketch is a DDSketch as a sparse bucket-index -> count map.
+  // Keys are int32 to match server storage (Map(Int32,UInt64)) and avoid a
+  // future migration. Interpreted per Envelope.sketch_format_version.
+  map<int32, uint64> latency_sketch = 10;
+  // status_code_breakdown is the exact-code detail (bounded, top-N) for the
+  // endpoint-detail view. Not a series-key dimension.
+  map<uint32, uint64> status_code_breakdown = 11;
+}
+
+// UploadRequest is one batched, fire-and-forget upload.
+message UploadRequest {
+  Envelope envelope = 1;
+  repeated Summary summaries = 2;
+}
+
+message UploadResponse {
+  // accepted is false when the whole batch was rejected (e.g. bad key handled
+  // at the transport layer); reason carries a machine-readable code the client
+  // logs (rate-limited) and surfaces in the dashboard.
+  bool accepted = 1;
+  string reason = 2;
+  // rejected_summaries reports partial drops (e.g. cardinality frozen) so the
+  // client can log the count without failing the whole upload.
+  uint64 rejected_summaries = 3;
+}
+
+// Handshake is a one-time registration ping sent on recorder startup. It proves
+// auth + connectivity before any traffic and drives the dashboard onboarding
+// state. It is not a metric. (Named for the domain concept, not
+// RegisterRequest — see the RPC_REQUEST_STANDARD_NAME lint exception in
+// buf.yaml.)
+message Handshake {
+  string service = 1;
+  string instance = 2;
+  string sdk_version = 3;
+  uint32 sketch_format_version = 4;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+  string reason = 2;
+}
+
+// IngestService is the collector service. A Connect client speaking the gRPC
+// protocol (ADR-0002) talks to a native gRPC server.
+service IngestService {
+  rpc Register(Handshake) returns (RegisterResponse);
+  rpc Upload(UploadRequest) returns (UploadResponse);
+}

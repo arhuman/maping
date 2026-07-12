@@ -1,0 +1,9 @@
+go 1.26.5
+
+use (
+	./client
+	./client/gin
+	./example
+	./proto
+	./server
+)

@@ -1,0 +1,49 @@
+version: "2"
+
+# Standard project config. Includes the 10x-review complexity/duplication
+# thresholds (see 10x-review references/thresholds.md) so reviews and daily
+# linting measure the same things.
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - dupl
+    - funlen
+    - gocognit
+    - gocyclo
+    - govet
+    - nestif
+    - noctx
+    - revive
+    - sqlclosecheck
+    - staticcheck
+  settings:
+    dupl:
+      threshold: 50
+    funlen:
+      lines: 80
+      statements: -1
+    gocognit:
+      min-complexity: 16 # flags cognitive complexity > 15
+    gocyclo:
+      min-complexity: 11 # flags cyclomatic complexity > 10
+    nestif:
+      min-complexity: 4
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"
+        - "-U1000"
+  exclusions:
+    rules:
+      - linters:
+          - errcheck
+        text: "Error return value of .*\\.Close` is not checked"
+      - path: _test\.go
+        linters:
+          - dupl
+          - funlen
+          # Tests legitimately use http.Get/PostForm and httptest.NewRequest
+          # without a request context; noctx is a production-code concern.
+          - noctx

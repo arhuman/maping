@@ -1,0 +1,18 @@
+# Allowlist build context: exclude everything, then re-include only the Go
+# workspace inputs the Dockerfile compiles from. Keeps the context minimal so a
+# new artifact (dump, binary, coverage) can't silently bloat the image or bust
+# the layer cache. Keep in sync with the COPY lines in Dockerfile.
+*
+
+# Go workspace + the four modules (server is the binary; it needs proto via a
+# replace directive, and go.work pins client/example too).
+!go.work
+!go.work.sum
+!proto
+!client
+!server
+!example
+
+# Test files are never compiled into the binary (go build ignores *_test.go) —
+# drop them to shrink the context.
+**/*_test.go
