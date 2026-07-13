@@ -3,8 +3,8 @@ module github.com/arhuman/maping/client/gin
 go 1.26.5
 
 require (
-	github.com/arhuman/maping/client v0.0.0
-	github.com/arhuman/maping/proto v0.0.0
+	github.com/arhuman/maping/client v0.1.0
+	github.com/arhuman/maping/proto v0.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -45,7 +45,3 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/arhuman/maping/client => ../
-
-replace github.com/arhuman/maping/proto => ../../proto
