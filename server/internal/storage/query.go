@@ -143,6 +143,26 @@ func (q TenantQuery) EndpointDetail(
 	return QueryEndpointDetail(ctx, q.s.conn, q.tenant, service, method, route, from, to)
 }
 
+// InstancesForEndpoint forwards to the package-level instance-outlier breakdown
+// for the bound tenant.
+func (q TenantQuery) InstancesForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) ([]InstanceStat, error) {
+	return InstancesForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// LatencyByStatusClass forwards to the package-level per-class latency split for
+// the bound tenant.
+func (q TenantQuery) LatencyByStatusClass(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) (map[string]ClassLatency, error) {
+	return LatencyByStatusClass(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
 // SeriesOverTime returns the per-time-bucket RED distribution for a series over
 // [from, to), bucketed by step. method and route may be empty to aggregate
 // across all methods / all route templates of the service. Percentiles use the

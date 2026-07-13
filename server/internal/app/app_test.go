@@ -45,6 +45,9 @@ func (nopScopedQuery) Endpoints(context.Context, string, time.Time, time.Time) (
 func (nopScopedQuery) EndpointDetail(context.Context, string, string, string, time.Time, time.Time) (storage.EndpointDetail, error) {
 	return storage.EndpointDetail{}, nil
 }
+func (nopScopedQuery) InstancesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.InstanceStat, error) {
+	return nil, nil
+}
 func (nopScopedQuery) HasAnySummary(context.Context) (bool, error) { return false, nil }
 
 // fakeControlPlane is a scriptable controlPlane for the dashboard-wiring tests:
