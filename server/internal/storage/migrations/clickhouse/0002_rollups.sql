@@ -33,23 +33,23 @@ CREATE TABLE IF NOT EXISTS summaries_1m
         'STATUS_CLASS_NO_STATUS'   = 5
     ),
     window_start    DateTime64(3),
-    window_end      DateTime64(3),
-    count           UInt64,
-    sum_duration_ns UInt64,
-    req_bytes       UInt64,
-    resp_bytes      UInt64,
-    latency_sketch  Map(Int32, UInt64),
-    status_codes    Map(UInt32, UInt64)
+    window_end      SimpleAggregateFunction(max, DateTime64(3)),
+    count           SimpleAggregateFunction(sum, UInt64),
+    sum_duration_ns SimpleAggregateFunction(sum, UInt64),
+    req_bytes       SimpleAggregateFunction(sum, UInt64),
+    resp_bytes      SimpleAggregateFunction(sum, UInt64),
+    latency_sketch  SimpleAggregateFunction(sumMap, Map(Int32, UInt64)),
+    status_codes    SimpleAggregateFunction(sumMap, Map(UInt32, UInt64))
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(window_start)
-ORDER BY (tenant, service, route_template, status_class, window_start);
+ORDER BY (tenant, service, route_template, status_class, method, instance, window_start);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS summaries_1m_mv TO summaries_1m AS
 SELECT
     tenant, service, instance, method, route_template, status_class,
     toStartOfInterval(window_start, INTERVAL 1 minute) AS window_start,
-    toStartOfInterval(window_end, INTERVAL 1 minute)   AS window_end,
+    max(toStartOfInterval(window_end, INTERVAL 1 minute)) AS window_end,
     sum(count)                     AS count,
     sum(sum_duration_ns)           AS sum_duration_ns,
     sum(req_bytes)                 AS req_bytes,
@@ -57,7 +57,7 @@ SELECT
     sumMap(latency_sketch)         AS latency_sketch,
     sumMap(status_codes)           AS status_codes
 FROM summaries
-GROUP BY tenant, service, instance, method, route_template, status_class, window_start, window_end;
+GROUP BY tenant, service, instance, method, route_template, status_class, window_start;
 
 -- ---------------------------------------------------------------------------
 -- 1-hour tier (fed from 1m)
@@ -78,23 +78,23 @@ CREATE TABLE IF NOT EXISTS summaries_1h
         'STATUS_CLASS_NO_STATUS'   = 5
     ),
     window_start    DateTime64(3),
-    window_end      DateTime64(3),
-    count           UInt64,
-    sum_duration_ns UInt64,
-    req_bytes       UInt64,
-    resp_bytes      UInt64,
-    latency_sketch  Map(Int32, UInt64),
-    status_codes    Map(UInt32, UInt64)
+    window_end      SimpleAggregateFunction(max, DateTime64(3)),
+    count           SimpleAggregateFunction(sum, UInt64),
+    sum_duration_ns SimpleAggregateFunction(sum, UInt64),
+    req_bytes       SimpleAggregateFunction(sum, UInt64),
+    resp_bytes      SimpleAggregateFunction(sum, UInt64),
+    latency_sketch  SimpleAggregateFunction(sumMap, Map(Int32, UInt64)),
+    status_codes    SimpleAggregateFunction(sumMap, Map(UInt32, UInt64))
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(window_start)
-ORDER BY (tenant, service, route_template, status_class, window_start);
+ORDER BY (tenant, service, route_template, status_class, method, instance, window_start);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS summaries_1h_mv TO summaries_1h AS
 SELECT
     tenant, service, instance, method, route_template, status_class,
     toStartOfInterval(window_start, INTERVAL 1 hour) AS window_start,
-    toStartOfInterval(window_end, INTERVAL 1 hour)   AS window_end,
+    max(toStartOfInterval(window_end, INTERVAL 1 hour)) AS window_end,
     sum(count)                     AS count,
     sum(sum_duration_ns)           AS sum_duration_ns,
     sum(req_bytes)                 AS req_bytes,
@@ -102,7 +102,7 @@ SELECT
     sumMap(latency_sketch)         AS latency_sketch,
     sumMap(status_codes)           AS status_codes
 FROM summaries_1m
-GROUP BY tenant, service, instance, method, route_template, status_class, window_start, window_end;
+GROUP BY tenant, service, instance, method, route_template, status_class, window_start;
 
 -- ---------------------------------------------------------------------------
 -- 1-day tier (fed from 1h)
@@ -123,23 +123,23 @@ CREATE TABLE IF NOT EXISTS summaries_1d
         'STATUS_CLASS_NO_STATUS'   = 5
     ),
     window_start    DateTime64(3),
-    window_end      DateTime64(3),
-    count           UInt64,
-    sum_duration_ns UInt64,
-    req_bytes       UInt64,
-    resp_bytes      UInt64,
-    latency_sketch  Map(Int32, UInt64),
-    status_codes    Map(UInt32, UInt64)
+    window_end      SimpleAggregateFunction(max, DateTime64(3)),
+    count           SimpleAggregateFunction(sum, UInt64),
+    sum_duration_ns SimpleAggregateFunction(sum, UInt64),
+    req_bytes       SimpleAggregateFunction(sum, UInt64),
+    resp_bytes      SimpleAggregateFunction(sum, UInt64),
+    latency_sketch  SimpleAggregateFunction(sumMap, Map(Int32, UInt64)),
+    status_codes    SimpleAggregateFunction(sumMap, Map(UInt32, UInt64))
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(window_start)
-ORDER BY (tenant, service, route_template, status_class, window_start);
+ORDER BY (tenant, service, route_template, status_class, method, instance, window_start);
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS summaries_1d_mv TO summaries_1d AS
 SELECT
     tenant, service, instance, method, route_template, status_class,
     toStartOfInterval(window_start, INTERVAL 1 day) AS window_start,
-    toStartOfInterval(window_end, INTERVAL 1 day)   AS window_end,
+    max(toStartOfInterval(window_end, INTERVAL 1 day)) AS window_end,
     sum(count)                     AS count,
     sum(sum_duration_ns)           AS sum_duration_ns,
     sum(req_bytes)                 AS req_bytes,
@@ -147,7 +147,7 @@ SELECT
     sumMap(latency_sketch)         AS latency_sketch,
     sumMap(status_codes)           AS status_codes
 FROM summaries_1h
-GROUP BY tenant, service, instance, method, route_template, status_class, window_start, window_end;
+GROUP BY tenant, service, instance, method, route_template, status_class, window_start;
 
 -- ---------------------------------------------------------------------------
 -- Retention TTL. Each tier expires after it has been rolled into the next; the

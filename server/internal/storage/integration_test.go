@@ -176,3 +176,128 @@ func TestDashboardAggregates(t *testing.T) {
 	mergedDetail := map[int32]uint64{10: 1, 20: 1, 30: 10}
 	require.InDelta(t, QuantileFromBuckets(mergedDetail, 0.95), detail.P95, detail.P95*0.001+1e-9)
 }
+
+// TestInstancesForEndpoint exercises the instance-outlier breakdown against live
+// ClickHouse: two replicas of the same endpoint, one healthy and one degraded,
+// must come back as separate rows with per-instance error rates, percentiles,
+// and byte averages. It also asserts tenant isolation and the optional
+// method/route filter idiom.
+func TestInstancesForEndpoint(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("inst-tenant")
+
+	// pod-a: healthy, all 2xx, small payloads.
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "pod-a", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 10, 0, 100, 1000,
+		map[int32]uint64{10: 10}, map[uint32]uint64{200: 10},
+	)))
+	// pod-b: degraded, half 5xx, larger responses.
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "pod-b", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 5, 0, 200, 4000,
+		map[int32]uint64{30: 5}, map[uint32]uint64{200: 5},
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "pod-b", "GET", "/x", "STATUS_CLASS_5XX",
+		now, now.Add(5*time.Second), 5, 0, 200, 4000,
+		map[int32]uint64{40: 5}, map[uint32]uint64{500: 5},
+	)))
+	// Another tenant with the same names, to prove isolation.
+	require.NoError(t, w.Enqueue(NewRow(
+		tenant.MustParse("other-tenant"), "svc", "pod-a", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 99, 0, 0, 0,
+		map[int32]uint64{10: 99}, map[uint32]uint64{200: 99},
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+
+	// Ordered by instance: pod-a then pod-b, and only this tenant's rows.
+	insts, err := InstancesForEndpoint(context.Background(), conn, tid, "svc", "GET", "/x", from, to)
+	require.NoError(t, err)
+	require.Len(t, insts, 2)
+
+	require.Equal(t, "pod-a", insts[0].Instance)
+	require.Equal(t, uint64(10), insts[0].Count)
+	require.InDelta(t, 0.0, insts[0].ErrorRate, 1e-9)
+	// pod-a: total 10. Bytes are per-request averages: 100/10 = 10 req, 1000/10 = 100 resp.
+	require.InDelta(t, 10.0, insts[0].ReqBytesAvg, 1e-6)
+	require.InDelta(t, 100.0, insts[0].RespBytesAvg, 1e-6)
+
+	// pod-b: total 10, errors 5 -> 50%. Bytes: (200+200)/10 = 40 avg req.
+	require.Equal(t, "pod-b", insts[1].Instance)
+	require.Equal(t, uint64(10), insts[1].Count)
+	require.InDelta(t, 0.5, insts[1].ErrorRate, 1e-6)
+	require.InDelta(t, 40.0, insts[1].ReqBytesAvg, 1e-6)
+	require.InDelta(t, 800.0, insts[1].RespBytesAvg, 1e-6)
+
+	// The empty method/route filter aggregates across the whole service and still
+	// returns exactly this tenant's two instances.
+	all, err := InstancesForEndpoint(context.Background(), conn, tid, "svc", "", "", from, to)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+}
+
+// TestLatencyByStatusClass exercises the per-class latency split against live
+// ClickHouse: the same endpoint with slow 5xx and fast 2xx must return distinct
+// per-class percentiles, with every status class present (zero-valued when it
+// has no traffic).
+func TestLatencyByStatusClass(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("class-tenant")
+
+	// Fast 2xx (low bucket indices), slow 5xx (high bucket indices).
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "pod", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 10, 0, 0, 0,
+		map[int32]uint64{10: 10}, map[uint32]uint64{200: 10},
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "pod", "GET", "/x", "STATUS_CLASS_5XX",
+		now, now.Add(5*time.Second), 4, 0, 0, 0,
+		map[int32]uint64{300: 4}, map[uint32]uint64{500: 4},
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+
+	byClass, err := LatencyByStatusClass(context.Background(), conn, tid, "svc", "GET", "/x", from, to)
+	require.NoError(t, err)
+
+	// Every class is present; only 2xx and 5xx carry traffic.
+	require.Len(t, byClass, 5)
+	require.Equal(t, uint64(10), byClass["STATUS_CLASS_2XX"].Count)
+	require.Equal(t, uint64(4), byClass["STATUS_CLASS_5XX"].Count)
+	require.Zero(t, byClass["STATUS_CLASS_4XX"].Count)
+	require.Zero(t, byClass["STATUS_CLASS_4XX"].P95)
+
+	// The slow class's p95 must exceed the fast class's p95 (bucket 300 > 10).
+	require.Greater(t, byClass["STATUS_CLASS_5XX"].P95, byClass["STATUS_CLASS_2XX"].P95)
+
+	// Per-class percentiles match the frozen oracle on each class's own sketch.
+	require.InDelta(t, QuantileFromBuckets(map[int32]uint64{10: 10}, 0.95),
+		byClass["STATUS_CLASS_2XX"].P95, byClass["STATUS_CLASS_2XX"].P95*0.001+1e-9)
+	require.InDelta(t, QuantileFromBuckets(map[int32]uint64{300: 4}, 0.95),
+		byClass["STATUS_CLASS_5XX"].P95, byClass["STATUS_CLASS_5XX"].P95*0.001+1e-9)
+}

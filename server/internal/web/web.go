@@ -59,6 +59,7 @@ type ScopedQuery interface {
 	Services(ctx context.Context, from, to time.Time) ([]storage.ServiceStat, error)
 	Endpoints(ctx context.Context, service string, from, to time.Time) ([]storage.EndpointStat, error)
 	EndpointDetail(ctx context.Context, service, method, route string, from, to time.Time) (storage.EndpointDetail, error)
+	InstancesForEndpoint(ctx context.Context, service, method, route string, from, to time.Time) ([]storage.InstanceStat, error)
 	HasAnySummary(ctx context.Context) (bool, error)
 }
 
@@ -204,6 +205,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/series", h.serveSeries)
 	mux.HandleFunc("GET /api/histogram", h.serveHistogram)
+	mux.HandleFunc("GET /api/instances", h.serveInstances)
 
 	mux.HandleFunc("GET /assets/copy.js", h.serveCopyJS)
 }

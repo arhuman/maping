@@ -35,6 +35,9 @@ type fakeQuerier struct {
 
 	points    []storage.TimePoint
 	seriesErr error
+
+	instances    []storage.InstanceStat
+	instancesErr error
 }
 
 // Tenant binds the fake to a tenant, returning a fakeScopedQuery over the same
@@ -60,6 +63,9 @@ func (s fakeScopedQuery) EndpointDetail(context.Context, string, string, string,
 }
 func (s fakeScopedQuery) SeriesOverTime(context.Context, string, string, string, time.Time, time.Time, time.Duration) ([]storage.TimePoint, error) {
 	return s.f.points, s.f.seriesErr
+}
+func (s fakeScopedQuery) InstancesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.InstanceStat, error) {
+	return s.f.instances, s.f.instancesErr
 }
 
 // constTenant is the Part-1 tenant resolver: always resolves the dev tenant.
@@ -309,5 +315,35 @@ func TestHistogramQueryError(t *testing.T) {
 		Tenant:  constTenant,
 	})
 	code, _ := getBody(t, srv.URL+"/api/histogram")
+	assert.Equal(t, http.StatusInternalServerError, code)
+}
+
+func TestInstancesJSON(t *testing.T) {
+	q := fakeQuerier{instances: []storage.InstanceStat{
+		{Instance: "pod-a", Count: 100, ErrorRate: 0.01, P50: 0.01, P95: 0.2, P99: 0.5, ReqBytesAvg: 128, RespBytesAvg: 2048},
+		{Instance: "pod-b", Count: 40, ErrorRate: 0.75, P50: 0.02, P95: 0.9, P99: 1.5, ReqBytesAvg: 130, RespBytesAvg: 4096},
+	}}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	resp, err := http.Get(srv.URL + "/api/instances?service=svc&method=GET&route=/x")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out []instanceRow
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	require.Len(t, out, 2)
+	// The outlier replica (pod-b) is surfaced with its own elevated error rate.
+	assert.Equal(t, "pod-b", out[1].Instance)
+	assert.InDelta(t, 0.75, out[1].ErrorRate, 1e-9)
+	assert.InDelta(t, 4096, out[1].RespBytesAvg, 1e-9)
+}
+
+func TestInstancesQueryError(t *testing.T) {
+	srv := newServer(t, Config{
+		Querier: fakeQuerier{instancesErr: errors.New("boom")},
+		Tenant:  constTenant,
+	})
+	code, _ := getBody(t, srv.URL+"/api/instances")
 	assert.Equal(t, http.StatusInternalServerError, code)
 }

@@ -33,15 +33,20 @@ type ServiceStat struct {
 }
 
 // EndpointStat is one row of the endpoint-table level: aggregate RED metrics
-// for one (method, route_template) of a service over the query window.
+// for one (method, route_template) of a service over the query window. The
+// ReqBytesAvg / RespBytesAvg fields are the per-request average payload sizes
+// (sum(req_bytes)/sum(count), sum(resp_bytes)/sum(count)) for the bytes-symmetry
+// view; they are appended so existing scanners and callers stay valid.
 type EndpointStat struct {
-	Method    string
-	Route     string
-	Count     uint64
-	ErrorRate float64
-	P50       float64
-	P95       float64
-	P99       float64
+	Method       string
+	Route        string
+	Count        uint64
+	ErrorRate    float64
+	P50          float64
+	P95          float64
+	P99          float64
+	ReqBytesAvg  float64
+	RespBytesAvg float64
 }
 
 // HistogramBar is one bar of the latency histogram: the bucket's latency value
@@ -122,7 +127,9 @@ SELECT
     if(total_count = 0, 0, error_count / total_count) AS error_rate,
     ` + percentileExpr("0.50") + ` AS p50,
     ` + percentileExpr("0.95") + ` AS p95,
-    ` + percentileExpr("0.99") + ` AS p99
+    ` + percentileExpr("0.99") + ` AS p99,
+    if(total_count = 0, 0, sum(req_bytes) / total_count)  AS req_bytes_avg,
+    if(total_count = 0, 0, sum(resp_bytes) / total_count) AS resp_bytes_avg
 FROM %s
 WHERE tenant = ?
   AND service = ?
@@ -243,7 +250,7 @@ func Endpoints(
 	var out []EndpointStat
 	for rows.Next() {
 		var e EndpointStat
-		if err := rows.Scan(&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.P50, &e.P95, &e.P99); err != nil {
+		if err := rows.Scan(&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.P50, &e.P95, &e.P99, &e.ReqBytesAvg, &e.RespBytesAvg); err != nil {
 			return nil, fmt.Errorf("storage.Endpoints: scan: %w", err)
 		}
 		out = append(out, e)

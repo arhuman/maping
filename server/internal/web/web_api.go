@@ -64,6 +64,42 @@ func (h *Handler) serveHistogram(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.log, out)
 }
 
+// serveInstances is the instance-outlier JSON endpoint: the per-replica RED
+// breakdown for one endpoint, answering whether a degradation is confined to one
+// replica or is fleet-wide. Read-only GET, same auth/tenant + CSRF-exempt
+// treatment as /api/series and /api/histogram.
+func (h *Handler) serveInstances(w http.ResponseWriter, r *http.Request) {
+	tid, ok := h.resolveTenant(w, r)
+	if !ok {
+		return
+	}
+	service := r.URL.Query().Get("service")
+	method := r.URL.Query().Get("method")
+	route := r.URL.Query().Get("route")
+	from, to := windowRange(window)
+
+	instances, err := h.q.Tenant(tid).InstancesForEndpoint(r.Context(), service, method, route, from, to)
+	if err != nil {
+		h.serverError(w, "instances query", err)
+		return
+	}
+
+	out := make([]instanceRow, 0, len(instances))
+	for _, s := range instances {
+		out = append(out, instanceRow{
+			Instance:     s.Instance,
+			Count:        s.Count,
+			ErrorRate:    s.ErrorRate,
+			P50:          s.P50,
+			P95:          s.P95,
+			P99:          s.P99,
+			ReqBytesAvg:  s.ReqBytesAvg,
+			RespBytesAvg: s.RespBytesAvg,
+		})
+	}
+	writeJSON(w, h.log, out)
+}
+
 // writeJSON encodes v as JSON, logging on encode error.
 func writeJSON(w http.ResponseWriter, log *slog.Logger, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -86,4 +122,17 @@ type seriesPoint struct {
 type histogramBar struct {
 	Latency float64 `json:"latency"` // bucket latency in seconds
 	Count   uint64  `json:"count"`
+}
+
+// instanceRow is the JSON shape returned by the /api/instances endpoint: one
+// replica's RED breakdown plus average payload sizes.
+type instanceRow struct {
+	Instance     string  `json:"instance"`
+	Count        uint64  `json:"count"`
+	ErrorRate    float64 `json:"errorRate"`
+	P50          float64 `json:"p50"`
+	P95          float64 `json:"p95"`
+	P99          float64 `json:"p99"`
+	ReqBytesAvg  float64 `json:"reqBytesAvg"`
+	RespBytesAvg float64 `json:"respBytesAvg"`
 }
