@@ -29,6 +29,76 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// NoStatusReason explains why a request ended without an HTTP status written
+// (StatusClass NO_STATUS). The client derives it from the request context and
+// writer state so a spike of aborted requests can be told apart — a client
+// disconnect vs. a server-side deadline vs. a write failure vs. a panic —
+// instead of collapsing them all into one opaque "no status" bucket.
+type NoStatusReason int32
+
+const (
+	// NO_STATUS_REASON_UNSPECIFIED is the proto3 default: no reason was derived.
+	NoStatusReason_NO_STATUS_REASON_UNSPECIFIED NoStatusReason = 0
+	// NO_STATUS_REASON_CONTEXT_CANCELED: the request context was canceled (e.g.
+	// the client disconnected) before a status was written.
+	NoStatusReason_NO_STATUS_REASON_CONTEXT_CANCELED NoStatusReason = 1
+	// NO_STATUS_REASON_CONTEXT_DEADLINE: the request context deadline fired first.
+	NoStatusReason_NO_STATUS_REASON_CONTEXT_DEADLINE NoStatusReason = 2
+	// NO_STATUS_REASON_WRITE_ERROR: the handler finished without writing a status.
+	NoStatusReason_NO_STATUS_REASON_WRITE_ERROR NoStatusReason = 3
+	// NO_STATUS_REASON_PANIC: the request aborted on a panic before a status.
+	NoStatusReason_NO_STATUS_REASON_PANIC NoStatusReason = 4
+	// NO_STATUS_REASON_OTHER: aborted for a reason none of the above capture.
+	NoStatusReason_NO_STATUS_REASON_OTHER NoStatusReason = 5
+)
+
+// Enum value maps for NoStatusReason.
+var (
+	NoStatusReason_name = map[int32]string{
+		0: "NO_STATUS_REASON_UNSPECIFIED",
+		1: "NO_STATUS_REASON_CONTEXT_CANCELED",
+		2: "NO_STATUS_REASON_CONTEXT_DEADLINE",
+		3: "NO_STATUS_REASON_WRITE_ERROR",
+		4: "NO_STATUS_REASON_PANIC",
+		5: "NO_STATUS_REASON_OTHER",
+	}
+	NoStatusReason_value = map[string]int32{
+		"NO_STATUS_REASON_UNSPECIFIED":      0,
+		"NO_STATUS_REASON_CONTEXT_CANCELED": 1,
+		"NO_STATUS_REASON_CONTEXT_DEADLINE": 2,
+		"NO_STATUS_REASON_WRITE_ERROR":      3,
+		"NO_STATUS_REASON_PANIC":            4,
+		"NO_STATUS_REASON_OTHER":            5,
+	}
+)
+
+func (x NoStatusReason) Enum() *NoStatusReason {
+	p := new(NoStatusReason)
+	*p = x
+	return p
+}
+
+func (x NoStatusReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NoStatusReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_maping_v1_maping_proto_enumTypes[0].Descriptor()
+}
+
+func (NoStatusReason) Type() protoreflect.EnumType {
+	return &file_maping_v1_maping_proto_enumTypes[0]
+}
+
+func (x NoStatusReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NoStatusReason.Descriptor instead.
+func (NoStatusReason) EnumDescriptor() ([]byte, []int) {
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{0}
+}
+
 // StatusClass is the HTTP status bucket used as a series-key dimension.
 // Exact codes live in Summary.status_code_breakdown, never as a series label.
 type StatusClass int32
@@ -76,11 +146,11 @@ func (x StatusClass) String() string {
 }
 
 func (StatusClass) Descriptor() protoreflect.EnumDescriptor {
-	return file_maping_v1_maping_proto_enumTypes[0].Descriptor()
+	return file_maping_v1_maping_proto_enumTypes[1].Descriptor()
 }
 
 func (StatusClass) Type() protoreflect.EnumType {
-	return &file_maping_v1_maping_proto_enumTypes[0]
+	return &file_maping_v1_maping_proto_enumTypes[1]
 }
 
 func (x StatusClass) Number() protoreflect.EnumNumber {
@@ -89,7 +159,7 @@ func (x StatusClass) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StatusClass.Descriptor instead.
 func (StatusClass) EnumDescriptor() ([]byte, []int) {
-	return file_maping_v1_maping_proto_rawDescGZIP(), []int{0}
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{1}
 }
 
 // Envelope carries source identity and is sent once per upload batch.
@@ -104,8 +174,24 @@ type Envelope struct {
 	// dropped_summaries counts Summaries dropped by client backpressure since the
 	// last successful upload, so the gap is visible rather than silent.
 	DroppedSummaries uint64 `protobuf:"varint,5,opt,name=dropped_summaries,json=droppedSummaries,proto3" json:"dropped_summaries,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// deploy_version is the release version (semver or image tag) the process is
+	// running. A stored, low-cardinality dimension used to answer "did release X
+	// regress this endpoint?" — NOT part of the client-side series key.
+	DeployVersion string `protobuf:"bytes,6,opt,name=deploy_version,json=deployVersion,proto3" json:"deploy_version,omitempty"`
+	// deploy_id is the immutable build identity (git SHA / CI build id), so two
+	// releases sharing a version string can still be told apart.
+	DeployId string `protobuf:"bytes,7,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
+	// environment is the deployment environment (prod/staging/dev), a stored
+	// low-cardinality dimension.
+	Environment string `protobuf:"bytes,8,opt,name=environment,proto3" json:"environment,omitempty"`
+	// region is the deployment region (e.g. eu-west-1), a stored low-cardinality
+	// dimension.
+	Region string `protobuf:"bytes,9,opt,name=region,proto3" json:"region,omitempty"`
+	// instance_start_time_ms is the process boot wall-clock in epoch millis, so
+	// restarts can be correlated with a change in behavior.
+	InstanceStartTimeMs int64 `protobuf:"varint,10,opt,name=instance_start_time_ms,json=instanceStartTimeMs,proto3" json:"instance_start_time_ms,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Envelope) Reset() {
@@ -173,6 +259,41 @@ func (x *Envelope) GetDroppedSummaries() uint64 {
 	return 0
 }
 
+func (x *Envelope) GetDeployVersion() string {
+	if x != nil {
+		return x.DeployVersion
+	}
+	return ""
+}
+
+func (x *Envelope) GetDeployId() string {
+	if x != nil {
+		return x.DeployId
+	}
+	return ""
+}
+
+func (x *Envelope) GetEnvironment() string {
+	if x != nil {
+		return x.Environment
+	}
+	return ""
+}
+
+func (x *Envelope) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *Envelope) GetInstanceStartTimeMs() int64 {
+	if x != nil {
+		return x.InstanceStartTimeMs
+	}
+	return 0
+}
+
 // Summary is one client-side aggregate for a single (endpoint, status-class)
 // over one flush window. It is the unit of data mAPI-ng ships (no per-request
 // events in v1).
@@ -194,8 +315,38 @@ type Summary struct {
 	// status_code_breakdown is the exact-code detail (bounded, top-N) for the
 	// endpoint-detail view. Not a series-key dimension.
 	StatusCodeBreakdown map[uint32]uint64 `protobuf:"bytes,11,rep,name=status_code_breakdown,json=statusCodeBreakdown,proto3" json:"status_code_breakdown,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// max_duration_ns is the exact slowest request observed in the window. Unlike
+	// the DDSketch percentiles (which are relative-error bounded), this is the
+	// true tail latency, merged across summaries with max.
+	MaxDurationNs uint64 `protobuf:"varint,12,opt,name=max_duration_ns,json=maxDurationNs,proto3" json:"max_duration_ns,omitempty"`
+	// exemplars is a BOUNDED, best-effort sample of real requests from the window
+	// (the single slowest plus a few errors), so a user can pivot from a p99 or
+	// error spike to an actual request to open in their tracing tool or logs.
+	// They are breadcrumbs, not exact data: the client caps them per window and
+	// the server keeps them ONLY in the raw (finest) tier under its short TTL —
+	// rollups drop them. Not a series-key dimension.
+	Exemplars []*Exemplar `protobuf:"bytes,13,rep,name=exemplars,proto3" json:"exemplars,omitempty"`
+	// error_class_breakdown is a bounded, top-N count of normalized error labels
+	// (uppercase [A-Z0-9_], <=64 chars) the app/framework attached to requests in
+	// the window, so a 5xx spike can be attributed to a cause ("DB_POOL_EXHAUSTED"
+	// vs "UPSTREAM_TIMEOUT"). Bounded per series like status_code_breakdown; not a
+	// series-key dimension.
+	ErrorClassBreakdown map[string]uint64 `protobuf:"bytes,14,rep,name=error_class_breakdown,json=errorClassBreakdown,proto3" json:"error_class_breakdown,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// no_status_reasons counts, by NoStatusReason, why requests ended without a
+	// status written (see StatusClass NO_STATUS): timing out vs canceling vs
+	// crashing. The key is the NoStatusReason enum value carried as uint32, since
+	// proto3 map keys cannot be enum-typed.
+	NoStatusReasons map[uint32]uint64 `protobuf:"bytes,15,rep,name=no_status_reasons,json=noStatusReasons,proto3" json:"no_status_reasons,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	// sum_downstream_duration_ns is the summed time requests in the window spent
+	// waiting on downstream calls (outbound HTTP, and later DB/cache), so the
+	// endpoint's own time can be split from time it was merely blocked on a
+	// dependency — "the extra 45ms is all downstream". It is a scalar sum captured
+	// by the maping RoundTripper; requests that make no downstream calls (or a
+	// service that does not wire the RoundTripper) contribute zero, so the panel
+	// feature-gates on data presence.
+	SumDownstreamDurationNs uint64 `protobuf:"varint,16,opt,name=sum_downstream_duration_ns,json=sumDownstreamDurationNs,proto3" json:"sum_downstream_duration_ns,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *Summary) Reset() {
@@ -305,18 +456,148 @@ func (x *Summary) GetStatusCodeBreakdown() map[uint32]uint64 {
 	return nil
 }
 
-// UploadRequest is one batched, fire-and-forget upload.
-type UploadRequest struct {
+func (x *Summary) GetMaxDurationNs() uint64 {
+	if x != nil {
+		return x.MaxDurationNs
+	}
+	return 0
+}
+
+func (x *Summary) GetExemplars() []*Exemplar {
+	if x != nil {
+		return x.Exemplars
+	}
+	return nil
+}
+
+func (x *Summary) GetErrorClassBreakdown() map[string]uint64 {
+	if x != nil {
+		return x.ErrorClassBreakdown
+	}
+	return nil
+}
+
+func (x *Summary) GetNoStatusReasons() map[uint32]uint64 {
+	if x != nil {
+		return x.NoStatusReasons
+	}
+	return nil
+}
+
+func (x *Summary) GetSumDownstreamDurationNs() uint64 {
+	if x != nil {
+		return x.SumDownstreamDurationNs
+	}
+	return 0
+}
+
+// Exemplar is one real request pinned to a Summary as a debugging breadcrumb.
+// Every field except duration is best-effort: trace/span/request ids are filled
+// only when the adapter can extract them (e.g. a W3C traceparent header), and
+// are empty otherwise. Exemplars are bounded per window and live only in the
+// raw tier (see Summary.exemplars).
+type Exemplar struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Envelope      *Envelope              `protobuf:"bytes,1,opt,name=envelope,proto3" json:"envelope,omitempty"`
-	Summaries     []*Summary             `protobuf:"bytes,2,rep,name=summaries,proto3" json:"summaries,omitempty"`
+	AtMs          int64                  `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`                   // request completion wall-clock, epoch millis
+	DurationNs    uint64                 `protobuf:"varint,2,opt,name=duration_ns,json=durationNs,proto3" json:"duration_ns,omitempty"` // request latency
+	StatusCode    uint32                 `protobuf:"varint,3,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"` // exact HTTP status (0 when none was written)
+	TraceId       string                 `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`           // W3C/OTel trace id (32 hex chars), optional
+	SpanId        string                 `protobuf:"bytes,5,opt,name=span_id,json=spanId,proto3" json:"span_id,omitempty"`              // W3C/OTel span id (16 hex chars), optional
+	RequestId     string                 `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`     // app request id (e.g. X-Request-Id), optional
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
+func (x *Exemplar) Reset() {
+	*x = Exemplar{}
+	mi := &file_maping_v1_maping_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Exemplar) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Exemplar) ProtoMessage() {}
+
+func (x *Exemplar) ProtoReflect() protoreflect.Message {
+	mi := &file_maping_v1_maping_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Exemplar.ProtoReflect.Descriptor instead.
+func (*Exemplar) Descriptor() ([]byte, []int) {
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Exemplar) GetAtMs() int64 {
+	if x != nil {
+		return x.AtMs
+	}
+	return 0
+}
+
+func (x *Exemplar) GetDurationNs() uint64 {
+	if x != nil {
+		return x.DurationNs
+	}
+	return 0
+}
+
+func (x *Exemplar) GetStatusCode() uint32 {
+	if x != nil {
+		return x.StatusCode
+	}
+	return 0
+}
+
+func (x *Exemplar) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
+func (x *Exemplar) GetSpanId() string {
+	if x != nil {
+		return x.SpanId
+	}
+	return ""
+}
+
+func (x *Exemplar) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+// UploadRequest is one batched, fire-and-forget upload.
+type UploadRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Envelope  *Envelope              `protobuf:"bytes,1,opt,name=envelope,proto3" json:"envelope,omitempty"`
+	Summaries []*Summary             `protobuf:"bytes,2,rep,name=summaries,proto3" json:"summaries,omitempty"`
+	// instance_windows carries per-process resource gauges (USE: CPU, memory,
+	// goroutines, GC pause) sampled once per flush window, so a latency rise can be
+	// correlated with saturation ("p99 rose because GC pauses tripled") without a
+	// release. It is a separate stream from the per-endpoint summaries and is stored
+	// in its own table; typically one entry per upload.
+	InstanceWindows []*InstanceWindow `protobuf:"bytes,3,rep,name=instance_windows,json=instanceWindows,proto3" json:"instance_windows,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
 func (x *UploadRequest) Reset() {
 	*x = UploadRequest{}
-	mi := &file_maping_v1_maping_proto_msgTypes[2]
+	mi := &file_maping_v1_maping_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +609,7 @@ func (x *UploadRequest) String() string {
 func (*UploadRequest) ProtoMessage() {}
 
 func (x *UploadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_maping_v1_maping_proto_msgTypes[2]
+	mi := &file_maping_v1_maping_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +622,7 @@ func (x *UploadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadRequest.ProtoReflect.Descriptor instead.
 func (*UploadRequest) Descriptor() ([]byte, []int) {
-	return file_maping_v1_maping_proto_rawDescGZIP(), []int{2}
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *UploadRequest) GetEnvelope() *Envelope {
@@ -356,6 +637,110 @@ func (x *UploadRequest) GetSummaries() []*Summary {
 		return x.Summaries
 	}
 	return nil
+}
+
+func (x *UploadRequest) GetInstanceWindows() []*InstanceWindow {
+	if x != nil {
+		return x.InstanceWindows
+	}
+	return nil
+}
+
+// InstanceWindow is one process-level resource snapshot over a flush window: the
+// USE-style saturation gauges the client samples from the Go runtime. Cumulative
+// counters (cpu_ns, gc_pause_ns) are reported as the DELTA over the window; the
+// rest are point-in-time reads at sample time. Every field is best-effort and may
+// be zero (e.g. cpu_ns on a platform where process CPU time is unavailable).
+type InstanceWindow struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WindowStartMs  int64                  `protobuf:"varint,1,opt,name=window_start_ms,json=windowStartMs,proto3" json:"window_start_ms,omitempty"`    // window start, epoch millis (client wall clock)
+	WindowEndMs    int64                  `protobuf:"varint,2,opt,name=window_end_ms,json=windowEndMs,proto3" json:"window_end_ms,omitempty"`          // window end, epoch millis
+	CpuNs          uint64                 `protobuf:"varint,3,opt,name=cpu_ns,json=cpuNs,proto3" json:"cpu_ns,omitempty"`                              // process CPU time consumed during the window
+	RssBytes       uint64                 `protobuf:"varint,4,opt,name=rss_bytes,json=rssBytes,proto3" json:"rss_bytes,omitempty"`                     // resident memory proxy (runtime Sys bytes)
+	HeapAllocBytes uint64                 `protobuf:"varint,5,opt,name=heap_alloc_bytes,json=heapAllocBytes,proto3" json:"heap_alloc_bytes,omitempty"` // live heap bytes at sample time
+	GcPauseNs      uint64                 `protobuf:"varint,6,opt,name=gc_pause_ns,json=gcPauseNs,proto3" json:"gc_pause_ns,omitempty"`                // GC stop-the-world pause time during the window
+	Goroutines     uint64                 `protobuf:"varint,7,opt,name=goroutines,proto3" json:"goroutines,omitempty"`                                 // goroutine count at sample time
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *InstanceWindow) Reset() {
+	*x = InstanceWindow{}
+	mi := &file_maping_v1_maping_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstanceWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstanceWindow) ProtoMessage() {}
+
+func (x *InstanceWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_maping_v1_maping_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstanceWindow.ProtoReflect.Descriptor instead.
+func (*InstanceWindow) Descriptor() ([]byte, []int) {
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *InstanceWindow) GetWindowStartMs() int64 {
+	if x != nil {
+		return x.WindowStartMs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetWindowEndMs() int64 {
+	if x != nil {
+		return x.WindowEndMs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetCpuNs() uint64 {
+	if x != nil {
+		return x.CpuNs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetRssBytes() uint64 {
+	if x != nil {
+		return x.RssBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetHeapAllocBytes() uint64 {
+	if x != nil {
+		return x.HeapAllocBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetGcPauseNs() uint64 {
+	if x != nil {
+		return x.GcPauseNs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetGoroutines() uint64 {
+	if x != nil {
+		return x.Goroutines
+	}
+	return 0
 }
 
 type UploadResponse struct {
@@ -374,7 +759,7 @@ type UploadResponse struct {
 
 func (x *UploadResponse) Reset() {
 	*x = UploadResponse{}
-	mi := &file_maping_v1_maping_proto_msgTypes[3]
+	mi := &file_maping_v1_maping_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -386,7 +771,7 @@ func (x *UploadResponse) String() string {
 func (*UploadResponse) ProtoMessage() {}
 
 func (x *UploadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_maping_v1_maping_proto_msgTypes[3]
+	mi := &file_maping_v1_maping_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -399,7 +784,7 @@ func (x *UploadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadResponse.ProtoReflect.Descriptor instead.
 func (*UploadResponse) Descriptor() ([]byte, []int) {
-	return file_maping_v1_maping_proto_rawDescGZIP(), []int{3}
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UploadResponse) GetAccepted() bool {
@@ -440,7 +825,7 @@ type Handshake struct {
 
 func (x *Handshake) Reset() {
 	*x = Handshake{}
-	mi := &file_maping_v1_maping_proto_msgTypes[4]
+	mi := &file_maping_v1_maping_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +837,7 @@ func (x *Handshake) String() string {
 func (*Handshake) ProtoMessage() {}
 
 func (x *Handshake) ProtoReflect() protoreflect.Message {
-	mi := &file_maping_v1_maping_proto_msgTypes[4]
+	mi := &file_maping_v1_maping_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +850,7 @@ func (x *Handshake) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Handshake.ProtoReflect.Descriptor instead.
 func (*Handshake) Descriptor() ([]byte, []int) {
-	return file_maping_v1_maping_proto_rawDescGZIP(), []int{4}
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Handshake) GetService() string {
@@ -506,7 +891,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_maping_v1_maping_proto_msgTypes[5]
+	mi := &file_maping_v1_maping_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +903,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_maping_v1_maping_proto_msgTypes[5]
+	mi := &file_maping_v1_maping_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +916,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_maping_v1_maping_proto_rawDescGZIP(), []int{5}
+	return file_maping_v1_maping_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RegisterResponse) GetAccepted() bool {
@@ -552,14 +937,20 @@ var File_maping_v1_maping_proto protoreflect.FileDescriptor
 
 const file_maping_v1_maping_proto_rawDesc = "" +
 	"\n" +
-	"\x16maping/v1/maping.proto\x12\tmaping.v1\"\xc2\x01\n" +
+	"\x16maping/v1/maping.proto\x12\tmaping.v1\"\xf5\x02\n" +
 	"\bEnvelope\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x12\x1a\n" +
 	"\binstance\x18\x02 \x01(\tR\binstance\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
 	"sdkVersion\x122\n" +
 	"\x15sketch_format_version\x18\x04 \x01(\rR\x13sketchFormatVersion\x12+\n" +
-	"\x11dropped_summaries\x18\x05 \x01(\x04R\x10droppedSummaries\"\x82\x05\n" +
+	"\x11dropped_summaries\x18\x05 \x01(\x04R\x10droppedSummaries\x12%\n" +
+	"\x0edeploy_version\x18\x06 \x01(\tR\rdeployVersion\x12\x1b\n" +
+	"\tdeploy_id\x18\a \x01(\tR\bdeployId\x12 \n" +
+	"\venvironment\x18\b \x01(\tR\venvironment\x12\x16\n" +
+	"\x06region\x18\t \x01(\tR\x06region\x123\n" +
+	"\x16instance_start_time_ms\x18\n" +
+	" \x01(\x03R\x13instanceStartTimeMs\"\xdc\b\n" +
 	"\aSummary\x12&\n" +
 	"\x0fwindow_start_ms\x18\x01 \x01(\x03R\rwindowStartMs\x12\"\n" +
 	"\rwindow_end_ms\x18\x02 \x01(\x03R\vwindowEndMs\x12\x16\n" +
@@ -573,16 +964,48 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"resp_bytes\x18\t \x01(\x04R\trespBytes\x12L\n" +
 	"\x0elatency_sketch\x18\n" +
 	" \x03(\v2%.maping.v1.Summary.LatencySketchEntryR\rlatencySketch\x12_\n" +
-	"\x15status_code_breakdown\x18\v \x03(\v2+.maping.v1.Summary.StatusCodeBreakdownEntryR\x13statusCodeBreakdown\x1a@\n" +
+	"\x15status_code_breakdown\x18\v \x03(\v2+.maping.v1.Summary.StatusCodeBreakdownEntryR\x13statusCodeBreakdown\x12&\n" +
+	"\x0fmax_duration_ns\x18\f \x01(\x04R\rmaxDurationNs\x121\n" +
+	"\texemplars\x18\r \x03(\v2\x13.maping.v1.ExemplarR\texemplars\x12_\n" +
+	"\x15error_class_breakdown\x18\x0e \x03(\v2+.maping.v1.Summary.ErrorClassBreakdownEntryR\x13errorClassBreakdown\x12S\n" +
+	"\x11no_status_reasons\x18\x0f \x03(\v2'.maping.v1.Summary.NoStatusReasonsEntryR\x0fnoStatusReasons\x12;\n" +
+	"\x1asum_downstream_duration_ns\x18\x10 \x01(\x04R\x17sumDownstreamDurationNs\x1a@\n" +
 	"\x12LatencySketchEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\x1aF\n" +
 	"\x18StatusCodeBreakdownEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"r\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\x1aF\n" +
+	"\x18ErrorClassBreakdownEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\x1aB\n" +
+	"\x14NoStatusReasonsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\xb4\x01\n" +
+	"\bExemplar\x12\x13\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x12\x1f\n" +
+	"\vduration_ns\x18\x02 \x01(\x04R\n" +
+	"durationNs\x12\x1f\n" +
+	"\vstatus_code\x18\x03 \x01(\rR\n" +
+	"statusCode\x12\x19\n" +
+	"\btrace_id\x18\x04 \x01(\tR\atraceId\x12\x17\n" +
+	"\aspan_id\x18\x05 \x01(\tR\x06spanId\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\"\xb8\x01\n" +
 	"\rUploadRequest\x12/\n" +
 	"\benvelope\x18\x01 \x01(\v2\x13.maping.v1.EnvelopeR\benvelope\x120\n" +
-	"\tsummaries\x18\x02 \x03(\v2\x12.maping.v1.SummaryR\tsummaries\"s\n" +
+	"\tsummaries\x18\x02 \x03(\v2\x12.maping.v1.SummaryR\tsummaries\x12D\n" +
+	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\xfa\x01\n" +
+	"\x0eInstanceWindow\x12&\n" +
+	"\x0fwindow_start_ms\x18\x01 \x01(\x03R\rwindowStartMs\x12\"\n" +
+	"\rwindow_end_ms\x18\x02 \x01(\x03R\vwindowEndMs\x12\x15\n" +
+	"\x06cpu_ns\x18\x03 \x01(\x04R\x05cpuNs\x12\x1b\n" +
+	"\trss_bytes\x18\x04 \x01(\x04R\brssBytes\x12(\n" +
+	"\x10heap_alloc_bytes\x18\x05 \x01(\x04R\x0eheapAllocBytes\x12\x1e\n" +
+	"\vgc_pause_ns\x18\x06 \x01(\x04R\tgcPauseNs\x12\x1e\n" +
+	"\n" +
+	"goroutines\x18\a \x01(\x04R\n" +
+	"goroutines\"s\n" +
 	"\x0eUploadResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12-\n" +
@@ -595,7 +1018,14 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\x15sketch_format_version\x18\x04 \x01(\rR\x13sketchFormatVersion\"F\n" +
 	"\x10RegisterResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason*\x9f\x01\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason*\xda\x01\n" +
+	"\x0eNoStatusReason\x12 \n" +
+	"\x1cNO_STATUS_REASON_UNSPECIFIED\x10\x00\x12%\n" +
+	"!NO_STATUS_REASON_CONTEXT_CANCELED\x10\x01\x12%\n" +
+	"!NO_STATUS_REASON_CONTEXT_DEADLINE\x10\x02\x12 \n" +
+	"\x1cNO_STATUS_REASON_WRITE_ERROR\x10\x03\x12\x1a\n" +
+	"\x16NO_STATUS_REASON_PANIC\x10\x04\x12\x1a\n" +
+	"\x16NO_STATUS_REASON_OTHER\x10\x05*\x9f\x01\n" +
 	"\vStatusClass\x12\x1c\n" +
 	"\x18STATUS_CLASS_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10STATUS_CLASS_2XX\x10\x01\x12\x14\n" +
@@ -619,34 +1049,43 @@ func file_maping_v1_maping_proto_rawDescGZIP() []byte {
 	return file_maping_v1_maping_proto_rawDescData
 }
 
-var file_maping_v1_maping_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_maping_v1_maping_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_maping_v1_maping_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_maping_v1_maping_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_maping_v1_maping_proto_goTypes = []any{
-	(StatusClass)(0),         // 0: maping.v1.StatusClass
-	(*Envelope)(nil),         // 1: maping.v1.Envelope
-	(*Summary)(nil),          // 2: maping.v1.Summary
-	(*UploadRequest)(nil),    // 3: maping.v1.UploadRequest
-	(*UploadResponse)(nil),   // 4: maping.v1.UploadResponse
-	(*Handshake)(nil),        // 5: maping.v1.Handshake
-	(*RegisterResponse)(nil), // 6: maping.v1.RegisterResponse
-	nil,                      // 7: maping.v1.Summary.LatencySketchEntry
-	nil,                      // 8: maping.v1.Summary.StatusCodeBreakdownEntry
+	(NoStatusReason)(0),      // 0: maping.v1.NoStatusReason
+	(StatusClass)(0),         // 1: maping.v1.StatusClass
+	(*Envelope)(nil),         // 2: maping.v1.Envelope
+	(*Summary)(nil),          // 3: maping.v1.Summary
+	(*Exemplar)(nil),         // 4: maping.v1.Exemplar
+	(*UploadRequest)(nil),    // 5: maping.v1.UploadRequest
+	(*InstanceWindow)(nil),   // 6: maping.v1.InstanceWindow
+	(*UploadResponse)(nil),   // 7: maping.v1.UploadResponse
+	(*Handshake)(nil),        // 8: maping.v1.Handshake
+	(*RegisterResponse)(nil), // 9: maping.v1.RegisterResponse
+	nil,                      // 10: maping.v1.Summary.LatencySketchEntry
+	nil,                      // 11: maping.v1.Summary.StatusCodeBreakdownEntry
+	nil,                      // 12: maping.v1.Summary.ErrorClassBreakdownEntry
+	nil,                      // 13: maping.v1.Summary.NoStatusReasonsEntry
 }
 var file_maping_v1_maping_proto_depIdxs = []int32{
-	0, // 0: maping.v1.Summary.status_class:type_name -> maping.v1.StatusClass
-	7, // 1: maping.v1.Summary.latency_sketch:type_name -> maping.v1.Summary.LatencySketchEntry
-	8, // 2: maping.v1.Summary.status_code_breakdown:type_name -> maping.v1.Summary.StatusCodeBreakdownEntry
-	1, // 3: maping.v1.UploadRequest.envelope:type_name -> maping.v1.Envelope
-	2, // 4: maping.v1.UploadRequest.summaries:type_name -> maping.v1.Summary
-	5, // 5: maping.v1.IngestService.Register:input_type -> maping.v1.Handshake
-	3, // 6: maping.v1.IngestService.Upload:input_type -> maping.v1.UploadRequest
-	6, // 7: maping.v1.IngestService.Register:output_type -> maping.v1.RegisterResponse
-	4, // 8: maping.v1.IngestService.Upload:output_type -> maping.v1.UploadResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	1,  // 0: maping.v1.Summary.status_class:type_name -> maping.v1.StatusClass
+	10, // 1: maping.v1.Summary.latency_sketch:type_name -> maping.v1.Summary.LatencySketchEntry
+	11, // 2: maping.v1.Summary.status_code_breakdown:type_name -> maping.v1.Summary.StatusCodeBreakdownEntry
+	4,  // 3: maping.v1.Summary.exemplars:type_name -> maping.v1.Exemplar
+	12, // 4: maping.v1.Summary.error_class_breakdown:type_name -> maping.v1.Summary.ErrorClassBreakdownEntry
+	13, // 5: maping.v1.Summary.no_status_reasons:type_name -> maping.v1.Summary.NoStatusReasonsEntry
+	2,  // 6: maping.v1.UploadRequest.envelope:type_name -> maping.v1.Envelope
+	3,  // 7: maping.v1.UploadRequest.summaries:type_name -> maping.v1.Summary
+	6,  // 8: maping.v1.UploadRequest.instance_windows:type_name -> maping.v1.InstanceWindow
+	8,  // 9: maping.v1.IngestService.Register:input_type -> maping.v1.Handshake
+	5,  // 10: maping.v1.IngestService.Upload:input_type -> maping.v1.UploadRequest
+	9,  // 11: maping.v1.IngestService.Register:output_type -> maping.v1.RegisterResponse
+	7,  // 12: maping.v1.IngestService.Upload:output_type -> maping.v1.UploadResponse
+	11, // [11:13] is the sub-list for method output_type
+	9,  // [9:11] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_maping_v1_maping_proto_init() }
@@ -659,8 +1098,8 @@ func file_maping_v1_maping_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_maping_v1_maping_proto_rawDesc), len(file_maping_v1_maping_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   8,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
