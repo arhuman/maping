@@ -81,7 +81,10 @@ func TestSummaryToRow(t *testing.T) {
 		},
 	}
 
-	row, err := summaryToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1", s, start, end)
+	instanceStart := time.Date(2026, 7, 9, 11, 30, 0, 0, time.UTC)
+	row, err := summaryToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1",
+		"v1.2.3", "abc123sha", "prod", "eu-west-1", instanceStart,
+		s, start, end)
 	require.NoError(t, err)
 
 	assert.Equal(t, "dev-tenant", row.Tenant.String())
@@ -93,13 +96,106 @@ func TestSummaryToRow(t *testing.T) {
 	assert.Equal(t, uint64(42), row.Count)
 	assert.Equal(t, start, row.WindowStart)
 	assert.Equal(t, end, row.WindowEnd)
+	// Deploy identity from the Envelope lands in the Row.
+	assert.Equal(t, "v1.2.3", row.DeployVersion)
+	assert.Equal(t, "abc123sha", row.DeployID)
+	assert.Equal(t, "prod", row.Environment)
+	assert.Equal(t, "eu-west-1", row.Region)
+	assert.Equal(t, instanceStart, row.InstanceStart)
 	// Sketch keys sorted ascending.
 	require.Len(t, row.Sketch, 2)
 	assert.Equal(t, int32(10), row.Sketch[0].Index)
 	assert.Equal(t, int32(30), row.Sketch[1].Index)
 }
 
+func TestSummaryToRowExemplars(t *testing.T) {
+	start := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	end := start.Add(5 * time.Second)
+	atMs := start.Add(time.Second).UnixMilli()
+	s := &mapingv1.Summary{
+		Method:        "GET",
+		RouteTemplate: "/x",
+		StatusClass:   mapingv1.StatusClass_STATUS_CLASS_5XX,
+		Count:         3,
+		MaxDurationNs: 987_654_321,
+		Exemplars: []*mapingv1.Exemplar{
+			{
+				AtMs:       atMs,
+				DurationNs: 987_654_321,
+				StatusCode: 503,
+				TraceId:    "4bf92f3577b34da6a3ce929d0e0e4736",
+				SpanId:     "00f067aa0ba902b7",
+				RequestId:  "req-1",
+			},
+		},
+	}
+
+	row, err := summaryToRow(tenant.MustParse("t"), "svc", "inst",
+		"", "", "", "", time.Time{}, s, start, end)
+	require.NoError(t, err)
+
+	assert.Equal(t, uint64(987_654_321), row.MaxDurationNs)
+	require.Len(t, row.Exemplars, 1)
+	ex := row.Exemplars[0]
+	assert.Equal(t, time.UnixMilli(atMs).UTC(), ex.At)
+	assert.Equal(t, time.UTC, ex.At.Location(), "exemplar time must be UTC")
+	assert.Equal(t, uint64(987_654_321), ex.DurationNs)
+	assert.Equal(t, uint32(503), ex.StatusCode)
+	assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", ex.TraceID)
+	assert.Equal(t, "00f067aa0ba902b7", ex.SpanID)
+	assert.Equal(t, "req-1", ex.RequestID)
+}
+
+func TestSummaryToRowNoExemplars(t *testing.T) {
+	start := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	s := &mapingv1.Summary{Method: "GET", RouteTemplate: "/x"}
+	row, err := summaryToRow(tenant.MustParse("t"), "svc", "inst",
+		"", "", "", "", time.Time{}, s, start, start.Add(time.Second))
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0), row.MaxDurationNs)
+	assert.Empty(t, row.Exemplars)
+}
+
 func TestSummaryToRowNil(t *testing.T) {
-	_, err := summaryToRow(tenant.MustParse("t"), "s", "i", nil, time.Now(), time.Now())
+	_, err := summaryToRow(tenant.MustParse("t"), "s", "i",
+		"", "", "", "", time.Time{},
+		nil, time.Now(), time.Now())
 	assert.Error(t, err)
+}
+
+func TestInstanceWindowToRow(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	iw := &mapingv1.InstanceWindow{
+		WindowStartMs:  now.Add(-10 * time.Second).UnixMilli(),
+		WindowEndMs:    now.UnixMilli(),
+		CpuNs:          1500,
+		RssBytes:       2048,
+		HeapAllocBytes: 1024,
+		GcPauseNs:      300,
+		Goroutines:     42,
+	}
+	row, ok := instanceWindowToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1", iw, now)
+	require.True(t, ok)
+	assert.Equal(t, "dev-tenant", row.Tenant.String())
+	assert.Equal(t, "checkout-api", row.Service)
+	assert.Equal(t, "pod-1", row.Instance)
+	assert.Equal(t, uint64(1500), row.CPUNs)
+	assert.Equal(t, uint64(2048), row.RSSBytes)
+	assert.Equal(t, uint64(1024), row.HeapAllocBytes)
+	assert.Equal(t, uint64(300), row.GCPauseNs)
+	assert.Equal(t, uint64(42), row.Goroutines)
+}
+
+func TestInstanceWindowToRowRejectsSkewAndNil(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	// Out of the skew band: dropped, not clamped.
+	stale := &mapingv1.InstanceWindow{
+		WindowStartMs: now.Add(-2 * time.Hour).UnixMilli(),
+		WindowEndMs:   now.Add(-time.Hour).UnixMilli(),
+	}
+	_, ok := instanceWindowToRow(tenant.MustParse("t"), "svc", "inst", stale, now)
+	assert.False(t, ok, "an out-of-band window is rejected")
+
+	_, ok = instanceWindowToRow(tenant.MustParse("t"), "svc", "inst", nil, now)
+	assert.False(t, ok, "a nil window is rejected")
 }

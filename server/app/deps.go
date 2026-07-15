@@ -35,16 +35,41 @@ type controlPlane interface {
 // present; the frozen-cardinality func only when a guard was constructed. Every
 // control-plane-dependent field stays nil in static dev mode so the dashboard
 // renders without Postgres.
-func buildWebConfig(querier web.Querier, cp controlPlane, card *guardrail.Cardinality, authOn bool, constTenant, baseURL string, csrfKey []byte, log *slog.Logger) web.Config {
+func buildWebConfig(querier web.Querier, cp controlPlane, memberAdmin web.MemberAdmin, card *guardrail.Cardinality, authOn bool, constTenant, baseURL string, csrfKey []byte, log *slog.Logger) web.Config {
 	cfg := web.Config{
 		Querier: querier,
 		Logger:  log,
+		Tenant:  tenantResolver(authOn, constTenant),
+	}
+	if cp != nil {
+		// Self-serve key admin for the Setup page. The adapter wraps issued secrets
+		// with the deployment origin (control does not know the public URL); CSRF
+		// tokens are signed with the shared session key. The team panel (MemberAdmin)
+		// is composed in separately and only runs alongside a control plane.
+		cfg.Onboarding = onboardingSource(cp)
+		cfg.KeyAdmin = keyAdmin{cp: cp, baseURL: baseURL}
+		cfg.MemberAdmin = memberAdmin
+		cfg.CSRFKey = csrfKey
 	}
 	if authOn {
-		// The session carries the org id as a string; parse it into a tenant.ID at
-		// this boundary so the dashboard's data-plane reads receive a validated
-		// identity (a malformed/empty org reads as unauthenticated, not un-scoped).
-		cfg.Tenant = func(r *http.Request) (tenant.ID, bool) {
+		// The team panel admin-gates its actions on the session role; the member id
+		// stamps who sent an invite. Both come from the same verified session as the
+		// tenant, so a member can only ever act within their own org.
+		cfg.Role = sessionRole
+	}
+	if card != nil {
+		cfg.Frozen = card.Frozen
+	}
+	return cfg
+}
+
+// tenantResolver builds the dashboard's per-request tenant resolver: with auth on
+// it reads the authenticated org from the verified session (parsed into a tenant.ID
+// at this boundary so a malformed/empty org reads as unauthenticated, not
+// un-scoped); with auth off it returns the constant seeded dev tenant, parsed once.
+func tenantResolver(authOn bool, constTenant string) web.TenantResolver {
+	if authOn {
+		return func(r *http.Request) (tenant.ID, bool) {
 			s, ok := auth.TenantFromContext(r)
 			if !ok {
 				return tenant.ID{}, false
@@ -52,39 +77,42 @@ func buildWebConfig(querier web.Querier, cp controlPlane, card *guardrail.Cardin
 			id, err := tenant.Parse(s)
 			return id, err == nil
 		}
-	} else {
-		// Static dev mode: the constant seeded tenant, parsed once. An empty
-		// constant resolves to unauthenticated rather than panicking at startup.
-		constID, cErr := tenant.Parse(constTenant)
-		cfg.Tenant = func(*http.Request) (tenant.ID, bool) { return constID, cErr == nil }
 	}
-	if cp != nil {
-		cfg.Onboarding = func(ctx context.Context, tenant string) ([]web.ServiceOnboarding, error) {
-			got, err := cp.OnboardingState(ctx, tenant)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]web.ServiceOnboarding, 0, len(got))
-			for _, o := range got {
-				out = append(out, web.ServiceOnboarding{
-					Service:     o.Service,
-					Instance:    o.Instance,
-					HandshakeAt: o.HandshakeAt,
-				})
-			}
-			return out, nil
+	constID, cErr := tenant.Parse(constTenant)
+	return func(*http.Request) (tenant.ID, bool) { return constID, cErr == nil }
+}
+
+// sessionRole resolves the caller's role and member id from the verified session,
+// for the team panel's admin gate. ok=false when there is no session.
+func sessionRole(r *http.Request) (role, memberID string, ok bool) {
+	s, ok := auth.FromContext(r.Context())
+	if !ok {
+		return "", "", false
+	}
+	return s.Role, s.MemberID, true
+}
+
+// onboardingSource adapts the control plane's onboarding state into web's type.
+func onboardingSource(cp controlPlane) web.OnboardingSource {
+	return func(ctx context.Context, tenant string) ([]web.ServiceOnboarding, error) {
+		got, err := cp.OnboardingState(ctx, tenant)
+		if err != nil {
+			return nil, err
 		}
-		// Self-serve key management for the Setup page. The adapter wraps the
-		// issued secret with the deployment origin (token.Encode) so a single
-		// MAPING_KEY carries both credential and collector endpoint; CSRF tokens
-		// are signed with the shared session key.
-		cfg.KeyAdmin = keyAdmin{cp: cp, baseURL: baseURL}
-		cfg.CSRFKey = csrfKey
+		return mapSlice(got, func(o control.ServiceOnboarding) web.ServiceOnboarding {
+			return web.ServiceOnboarding{Service: o.Service, Instance: o.Instance, HandshakeAt: o.HandshakeAt}
+		}), nil
 	}
-	if card != nil {
-		cfg.Frozen = card.Frozen
+}
+
+// mapSlice maps a slice through f, the shared shape of the control→web adapters so
+// each stays a single expression rather than a near-identical range loop.
+func mapSlice[A, B any](in []A, f func(A) B) []B {
+	out := make([]B, 0, len(in))
+	for _, v := range in {
+		out = append(out, f(v))
 	}
-	return cfg
+	return out
 }
 
 // scopedQuerier adapts *storage.QueryService to web.Querier. The QueryService's
@@ -115,22 +143,15 @@ func (a keyAdmin) IssueKey(ctx context.Context, orgID, label string) (string, er
 	return token.Encode(a.baseURL, secret), nil
 }
 
+//nolint:dupl // parallel control→web list adapter; only the element type/mapping differ.
 func (a keyAdmin) ListKeys(ctx context.Context, orgID string) ([]web.KeyInfo, error) {
 	got, err := a.cp.ListKeys(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]web.KeyInfo, 0, len(got))
-	for _, k := range got {
-		out = append(out, web.KeyInfo{
-			ID:        k.ID,
-			Label:     k.Label,
-			Last4:     k.Last4,
-			CreatedAt: k.CreatedAt,
-			RevokedAt: k.RevokedAt,
-		})
-	}
-	return out, nil
+	return mapSlice(got, func(k control.KeyInfo) web.KeyInfo {
+		return web.KeyInfo{ID: k.ID, Label: k.Label, Last4: k.Last4, CreatedAt: k.CreatedAt, RevokedAt: k.RevokedAt}
+	}), nil
 }
 
 func (a keyAdmin) RevokeKey(ctx context.Context, orgID, keyID string) error {
@@ -144,7 +165,7 @@ func (a keyAdmin) RevokeKey(ctx context.Context, orgID, keyID string) error {
 // dashboard). Dev-login is enabled automatically inside auth.New when no real
 // provider is configured, so a production deployment with GitHub/Google never
 // exposes the bypass.
-func buildAuth(store auth.MemberStore, baseURL string, key []byte, log *slog.Logger) (*auth.Auth, error) {
+func buildAuth(store auth.MemberStore, interceptor auth.LoginInterceptor, baseURL string, key []byte, log *slog.Logger) (*auth.Auth, error) {
 	if store == nil {
 		return nil, nil
 	}
@@ -156,5 +177,8 @@ func buildAuth(store auth.MemberStore, baseURL string, key []byte, log *slog.Log
 		Secure:     secureFromBaseURL(baseURL),
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 		Logger:     log,
+		// The post-auth hook is composed in (nil = plain login). A build wiring an
+		// invitation feature supplies its interceptor; the public core passes none.
+		Interceptor: interceptor,
 	})
 }

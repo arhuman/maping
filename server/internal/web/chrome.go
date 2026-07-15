@@ -28,6 +28,10 @@ type Shell struct {
 	Windows         []windowOption
 	WindowKey       string
 	FlushLabel      string
+	// KeyMask is the masked last-4 ("····<last4>") of the tenant's newest active
+	// ingest key, shown in the sidebar. Empty when there is no control plane or no
+	// active key, so the sidebar shows a muted "no active key" instead of a fake.
+	KeyMask string
 	// Live drives the casual-check auto-refresh: when true the page emits a
 	// meta-refresh and the top-bar indicator reads "live". LiveHref is the toggle
 	// link (set only on pages that support live refresh — the overview); an empty
@@ -107,12 +111,16 @@ func windowRange(d time.Duration) (from, to time.Time) {
 }
 
 // buildWindows builds the switcher options, preserving the request's other
-// query params (e.g. ?sort=) so switching the window never drops the sort.
+// query params (e.g. ?sort=) so switching the window never drops the sort. A
+// preset switch drops any custom detail range (?from=&to=): picking 5m/1h/24h is
+// the reset back to a preset lookback.
 func buildWindows(r *http.Request, active string) []windowOption {
 	out := make([]windowOption, 0, len(windowKeys))
 	for _, k := range windowKeys {
 		q := r.URL.Query()
 		q.Set("win", k)
+		q.Del("from")
+		q.Del("to")
 		out = append(out, windowOption{Key: k, Href: r.URL.Path + "?" + q.Encode(), Active: k == active})
 	}
 	return out
@@ -138,16 +146,32 @@ func liveToggleHref(r *http.Request, on bool) string {
 
 // -------------------------------------------------------------------- navbar
 
+// withWin appends the active window to an href so the selected lookback survives
+// navigation (nav, breadcrumbs, drill-downs). winKey is always an allowlisted key
+// (normalizeWindow guarantees it), so no escaping is needed; the separator adapts
+// to whether the href already carries a query (e.g. a drill's ?sort=). An empty
+// winKey (no shell window) leaves the href untouched.
+func withWin(href, winKey string) string {
+	if winKey == "" {
+		return href
+	}
+	sep := "?"
+	if strings.Contains(href, "?") {
+		sep = "&"
+	}
+	return href + sep + "win=" + winKey
+}
+
 // buildNav builds the sidebar nav with the active item highlighted. active is
 // one of "overview", "performance", "setup"; the endpoint/detail levels pass
 // "overview" so Services stays lit while drilling down. Setup owns both keys
 // management and the handshake stepper, so there is no separate "Ingest keys"
-// item.
-func buildNav(active string) []navItem {
+// item. winKey is threaded onto every href so switching pages keeps the lookback.
+func buildNav(active, winKey string) []navItem {
 	items := []navItem{
-		{Label: "Services", Icon: "▦", Href: "/", Badge: ""},
-		{Label: "Performance", Icon: "◈", Href: "/performance", Badge: ""},
-		{Label: "Setup", Icon: "✦", Href: "/setup", Badge: ""},
+		{Label: "Services", Icon: "▦", Href: withWin("/", winKey), Badge: ""},
+		{Label: "Performance", Icon: "◈", Href: withWin("/performance", winKey), Badge: ""},
+		{Label: "Setup", Icon: "✦", Href: withWin("/setup", winKey), Badge: ""},
 	}
 	navKey := map[string]string{
 		"Services": "overview", "Performance": "performance", "Setup": "setup",
@@ -160,12 +184,21 @@ func buildNav(active string) []navItem {
 
 // ---------------------------------------------------------------- formatters
 
-// fmtRate renders a per-second rate: 2103 -> "2.1k", 903 -> "903".
+// fmtRate renders a per-second rate: 2103 -> "2.1k", 903 -> "903", 0.285 -> "0.29".
+// Sub-1 rates keep two significant figures so a low-throughput or bursty endpoint
+// (whose count/window average is fractional) never renders as "0/s" next to a
+// nonzero request count — only a truly zero rate shows "0".
 func fmtRate(r float64) string {
-	if r >= 1000 {
+	switch {
+	case r >= 1000:
 		return strings.TrimSuffix(strconv.FormatFloat(r/1000, 'f', 1, 64), ".0") + "k"
+	case r >= 1:
+		return strconv.FormatFloat(r, 'f', 0, 64)
+	case r > 0:
+		return strconv.FormatFloat(r, 'g', 2, 64)
+	default:
+		return "0"
 	}
-	return strconv.FormatFloat(r, 'f', 0, 64)
 }
 
 // fmtCount renders a request total: 4.2M / 12.0k / 830.
@@ -214,6 +247,40 @@ func fmtMsUnit(sec float64) string {
 
 // fmtMsFull is the combined "value unit" form for table cells ("88 ms").
 func fmtMsFull(sec float64) string { return fmtMsVal(sec) + " " + fmtMsUnit(sec) }
+
+// fmtBytes renders a per-request average byte size human-readably: <1KiB -> "128 B",
+// <1MiB -> "1.9 KB", else "3.2 MB". The input is a float average (sum/count), so
+// sub-byte fractions round to whole bytes. Uses 1024-based units, dropping a
+// trailing ".0" so cells read cleanly ("2 KB" not "2.0 KB").
+func fmtBytes(avg float64) string {
+	switch {
+	case avg >= 1<<30:
+		return strings.TrimSuffix(strconv.FormatFloat(avg/(1<<30), 'f', 2, 64), ".00") + " GB"
+	case avg >= 1<<20:
+		return strings.TrimSuffix(strconv.FormatFloat(avg/(1<<20), 'f', 1, 64), ".0") + " MB"
+	case avg >= 1<<10:
+		return strings.TrimSuffix(strconv.FormatFloat(avg/(1<<10), 'f', 1, 64), ".0") + " KB"
+	default:
+		return strconv.FormatFloat(avg, 'f', 0, 64) + " B"
+	}
+}
+
+// fmtCompact renders a large count with a k/M/bn suffix (4400 -> "4.4k",
+// 1_200_000 -> "1.2M"), trimming a trailing ".0". Values below 1000 render as a
+// plain integer. Used for the request/summary counts on the performance page,
+// where the raw magnitudes are too large to read digit-by-digit.
+func fmtCompact(f float64) string {
+	switch {
+	case f >= 1e9:
+		return strings.TrimSuffix(strconv.FormatFloat(f/1e9, 'f', 1, 64), ".0") + "bn"
+	case f >= 1e6:
+		return strings.TrimSuffix(strconv.FormatFloat(f/1e6, 'f', 1, 64), ".0") + "M"
+	case f >= 1e3:
+		return strings.TrimSuffix(strconv.FormatFloat(f/1e3, 'f', 1, 64), ".0") + "k"
+	default:
+		return strconv.FormatFloat(f, 'f', 0, 64)
+	}
+}
 
 // ------------------------------------------------------------- colour classes
 

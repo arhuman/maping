@@ -48,6 +48,56 @@ func TestRateLimiterFallsBackToDefaults(t *testing.T) {
 	}
 }
 
+// TestRateLimiterSuspensionHardDenies proves that flipping a previously-active
+// tenant's budget to MaxRPS:0/Burst:0 (the control plane's suspension lever) takes
+// effect on the already-cached limiter: the very next request is denied.
+func TestRateLimiterSuspensionHardDenies(t *testing.T) {
+	ctx := context.Background()
+	provider := fakeProvider{limits: map[string]Limits{
+		"t": {MaxRPS: 100, Burst: 10},
+	}}
+	rl := NewRateLimiter(provider)
+
+	if !rl.Allow(ctx, "t") {
+		t.Fatalf("active tenant's first request should be allowed")
+	}
+	// Suspend: a zeroed budget (as a composing provider returns for a suspended
+	// tenant) must hard-deny the next request.
+	provider.limits["t"] = Limits{MaxRPS: 0, Burst: 0}
+	if rl.Allow(ctx, "t") {
+		t.Errorf("suspended tenant (MaxRPS:0/Burst:0) must be hard-denied on the next request")
+	}
+}
+
+// TestRateLimiterDowngradeTightensBurst proves a downgrade to a smaller burst
+// re-tunes the cached limiter: a tenant that was allowed a wide burst is capped to
+// the new, tighter budget rather than staying pinned to the first-seen one.
+func TestRateLimiterDowngradeTightensBurst(t *testing.T) {
+	ctx := context.Background()
+	provider := fakeProvider{limits: map[string]Limits{
+		"t": {MaxRPS: 1, Burst: 5},
+	}}
+	rl := NewRateLimiter(provider)
+
+	// Prime the cached limiter under the generous budget with a single call
+	// (tokens remain near the burst-5 cap).
+	if !rl.Allow(ctx, "t") {
+		t.Fatalf("first request under burst-5 should be allowed")
+	}
+	// Downgrade to burst-1/rate-1: SetBurst caps the outstanding tokens to 1, so at
+	// most one more immediate request is served before the bucket is dry.
+	provider.limits["t"] = Limits{MaxRPS: 1, Burst: 1}
+	served := 0
+	for i := 0; i < 5; i++ {
+		if rl.Allow(ctx, "t") {
+			served++
+		}
+	}
+	if served > 1 {
+		t.Errorf("downgraded burst-1 budget must cap the cached limiter, served %d immediate requests", served)
+	}
+}
+
 func TestRateLimiterTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	provider := fakeProvider{limits: map[string]Limits{

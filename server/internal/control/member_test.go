@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // fakeTx is a fake pgx.Tx that scripts QueryRow results in order and records
-// Commit/Rollback. It embeds pgx.Tx so it satisfies the interface without
+// Commit/Rollback/Exec. It embeds pgx.Tx so it satisfies the interface without
 // implementing the unused methods (they are never called by the code under
 // test; calling one would panic on the nil embedded value, flagging misuse).
 type fakeTx struct {
@@ -17,6 +18,8 @@ type fakeTx struct {
 	nextRow    int
 	committed  bool
 	rolledBack bool
+	execN      int
+	execTag    pgconn.CommandTag // returned by Exec (RowsAffected assertions)
 }
 
 func (t *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
@@ -26,6 +29,11 @@ func (t *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
 	row := t.rows[t.nextRow]
 	t.nextRow++
 	return row
+}
+
+func (t *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	t.execN++
+	return t.execTag, nil
 }
 
 func (t *fakeTx) Commit(context.Context) error   { t.committed = true; return nil }

@@ -21,7 +21,7 @@ func TestToServiceRowsErrorThreshold(t *testing.T) {
 	rows := toServiceRows([]storage.ServiceStat{
 		{Service: "a", Count: 100, ErrorRate: 0.049},
 		{Service: "b", Count: 100, ErrorRate: 0.05},
-	}, time.Hour)
+	}, time.Hour, "1h")
 	require.Len(t, rows, 2)
 	assert.False(t, rows[0].ErrorHigh, "just below threshold is not high")
 	assert.True(t, rows[1].ErrorHigh, "at threshold is high")
@@ -125,5 +125,39 @@ func TestBuildOnboarding(t *testing.T) {
 		assert.False(t, o.Steps[3].Done, "first data not yet received")
 		assert.True(t, o.Frozen)
 		require.Len(t, o.Connected, 1)
+	})
+}
+
+func TestBuildPerformance(t *testing.T) {
+	shell := Shell{}
+
+	t.Run("no data yet", func(t *testing.T) {
+		p := buildPerformance(shell, storage.PerformanceStat{}, 24*time.Hour, 2*time.Millisecond, "24h")
+		assert.False(t, p.HasData)
+		assert.Equal(t, "2", p.QueryMs, "query latency is shown even with no data")
+	})
+
+	t.Run("real traffic compresses and saves disk", func(t *testing.T) {
+		// 4.4M requests carried by 1000 summaries at ~400 B/summary on disk.
+		stat := storage.PerformanceStat{Requests: 4_400_000, Summaries: 1000, SummaryDiskBytes: 400_000}
+		p := buildPerformance(shell, stat, 24*time.Hour, 5*time.Millisecond, "24h")
+		require.True(t, p.HasData)
+		assert.Equal(t, "4.4M", p.Requests)
+		assert.Equal(t, "1k", p.Summaries)
+		assert.Equal(t, "4.4k×", p.Compression, "requests per shipped summary")
+		// Raw pipeline projected at bytesPerRawEvent/event dwarfs the measured summaries.
+		assert.NotEqual(t, "—", p.Ratio)
+		assert.NotEmpty(t, p.RawDisk)
+		assert.NotEmpty(t, p.SummaryDisk)
+	})
+
+	t.Run("very low traffic claims no reduction", func(t *testing.T) {
+		// A handful of requests but each summary carries fixed sketch overhead, so
+		// the projected raw size does not exceed the measured summary size.
+		stat := storage.PerformanceStat{Requests: 3, Summaries: 2, SummaryDiskBytes: 8000}
+		p := buildPerformance(shell, stat, 24*time.Hour, time.Millisecond, "24h")
+		require.True(t, p.HasData)
+		assert.Equal(t, "—", p.Ratio, "no honest reduction to claim at trivial volume")
+		assert.Equal(t, "100%", p.SummaryBarPct)
 	})
 }

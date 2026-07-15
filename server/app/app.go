@@ -27,6 +27,8 @@ import (
 	"github.com/arhuman/maping/server/internal/storage"
 	"github.com/arhuman/maping/server/internal/web"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/arhuman/maping/proto/maping/v1/mapingv1connect"
 	"github.com/arhuman/maping/proto/mapingcompress"
 )
@@ -51,8 +53,13 @@ const (
 // Run boots the collector and blocks until a shutdown signal, then drains
 // gracefully. It is the whole of what func main delegates to.
 //
-//nolint:gocyclo,funlen // linear boot+shutdown sequence; the length and cyclomatic count are sequential err/nil guards, not branching logic.
-func Run(log *slog.Logger) error {
+//nolint:gocyclo,funlen,gocognit // linear boot+shutdown sequence; the length and complexity are sequential err/nil guards, not branching logic.
+func Run(log *slog.Logger, opts ...Option) error {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelStart()
 
@@ -67,7 +74,7 @@ func Run(log *slog.Logger) error {
 		return err
 	}
 
-	wiring, err := buildIngestWiring(startCtx, log)
+	wiring, err := buildIngestWiring(startCtx, log, o.limitProvider, o.migrations)
 	if err != nil {
 		return err
 	}
@@ -79,7 +86,10 @@ func Run(log *slog.Logger) error {
 			store.Close()
 		}
 	}
-	ingestHandler := ingest.NewHandler(wiring.resolver, writer, log, wiring.opts...)
+	// The writer is both the summary RowSink and the per-instance USE-gauge sink;
+	// wire the latter explicitly so instance windows are ingested into their table.
+	ingestOpts := append(wiring.opts, ingest.WithInstanceWindowSink(writer))
+	ingestHandler := ingest.NewHandler(wiring.resolver, writer, log, ingestOpts...)
 
 	// The deployment origin (embedded in issued keys) and the HMAC key that signs
 	// both session cookies and the Setup form CSRF tokens are resolved once and
@@ -101,7 +111,24 @@ func Run(log *slog.Logger) error {
 		memberStore, cp = store, store
 	}
 
-	authLayer, err := buildAuth(memberStore, baseURL, sessKey, log)
+	// The composed post-auth hook (invitation accept) and team-panel admin are
+	// built here, once the control-plane pool exists — their invite store needs it.
+	// Both stay nil without a control plane, so dev mode is plain login with no
+	// team panel.
+	var (
+		interceptor LoginInterceptor
+		memberAdmin MemberAdmin
+	)
+	if store != nil {
+		if o.loginInterceptor != nil {
+			interceptor = o.loginInterceptor(store.Pool())
+		}
+		if o.memberAdmin != nil {
+			memberAdmin = o.memberAdmin(store.Pool())
+		}
+	}
+
+	authLayer, err := buildAuth(memberStore, interceptor, baseURL, sessKey, log)
 	if err != nil {
 		closeStore()
 		return err
@@ -109,7 +136,7 @@ func Run(log *slog.Logger) error {
 
 	querier := scopedQuerier{qs: writer.QueryService()}
 	webHandler, err := web.NewHandler(
-		buildWebConfig(querier, cp, wiring.card, authLayer != nil, wiring.tenant, baseURL, sessKey, log))
+		buildWebConfig(querier, cp, memberAdmin, wiring.card, authLayer != nil, wiring.tenant, baseURL, sessKey, log))
 	if err != nil {
 		closeStore()
 		return err
@@ -121,8 +148,38 @@ func Run(log *slog.Logger) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler(&ready))
-	mountDashboard(mux, webHandler, authLayer, log)
+	// The public landing page ("/" for anonymous visitors) is opt-in via
+	// WithPublicHome; a self-host/OSS deployment wires none, so anonymous "/"
+	// redirects to /login. A composing build supplies the marketing home and
+	// registers /pricing via WithRoutes.
+	mountDashboard(mux, webHandler, o.publicHome, authLayer, log)
 	mountIngest(mux, ingestHandler, maxBodyCeiling(log))
+
+	// Extension routes mount after the core surfaces so their patterns compose by
+	// ServeMux precedence. The pool is nil in static dev mode (no control plane).
+	// gate/sessionOrg give a registrar the dashboard auth middleware and the
+	// verified-org reader (both nil when auth is off), so a composing build mounts
+	// its own authenticated routes — e.g. billing checkout/portal — without
+	// importing the internal auth package.
+	var pool *pgxpool.Pool
+	if store != nil {
+		pool = store.Pool()
+	}
+	var (
+		gate       func(http.Handler) http.Handler
+		sessionOrg func(*http.Request) (string, bool)
+	)
+	if authLayer != nil {
+		gate = authLayer.Middleware
+		sessionOrg = auth.TenantFromContext
+	}
+	mountExtensions(mux, o.routes, pool, gate, sessionOrg, log)
+
+	// Background loops (extension jobs, e.g. the billing reconciler) share one
+	// context, cancelled on shutdown so every goroutine exits before the pool closes.
+	bgCtx, cancelBg := context.WithCancel(context.Background())
+	defer cancelBg()
+	startBackgroundJobs(bgCtx, o.jobs, pool, log)
 
 	srv := newHTTPServer(os.Getenv("MAPING_LISTEN"), mux)
 
@@ -178,20 +235,46 @@ func healthHandler(ready *atomic.Bool) http.HandlerFunc {
 // mountDashboard attaches the dashboard at "/". When auth is on, the web routes
 // live on a sub-mux wrapped by auth.Middleware while the open login routes
 // register directly on the outer mux — Go 1.22 ServeMux precedence makes those
-// more-specific patterns bypass the gate. When auth is off the dashboard is open.
-// Either way "/" is a bare (method-less) pattern so it does not conflict with the
-// more-specific ingest path on the outer mux.
-func mountDashboard(mux *http.ServeMux, webHandler *web.Handler, authLayer *auth.Auth, log *slog.Logger) {
+// more-specific patterns bypass the gate. "/" itself dispatches: when a public
+// home is wired (a composing build's marketing landing) an anonymous visitor sees
+// it and a signed-in one gets the dashboard; when it is nil (self-host/OSS/dev)
+// anonymous "/" redirects to /login. Either way "/" is a bare (method-less)
+// pattern so it does not conflict with the more-specific ingest path.
+func mountDashboard(mux *http.ServeMux, webHandler *web.Handler, home http.HandlerFunc, authLayer *auth.Auth, log *slog.Logger) {
 	webMux := http.NewServeMux()
 	webHandler.Register(webMux)
 	if authLayer == nil {
 		mux.Handle("/", webMux)
 		return
 	}
-	mux.Handle("/", authLayer.Middleware(webMux))
+	gated := authLayer.Middleware(webMux)
+	if home != nil {
+		// Public home wired: anonymous "/" serves it; signed-in users and every
+		// sub-path fall through to the gated dashboard. Companion routes (e.g.
+		// /pricing) are registered by the composing build via WithRoutes.
+		mux.Handle("/", rootHandler(authLayer, gated, home))
+	} else {
+		// No public home: "/" is the gated dashboard (anonymous -> /login).
+		mux.Handle("/", gated)
+	}
 	authLayer.Register(mux)
 	providers, devLogin := authLayer.Enabled()
-	log.Info("dashboard auth enabled", slog.Any("providers", providers), slog.Bool("dev_login", devLogin))
+	log.Info("dashboard auth enabled",
+		slog.Any("providers", providers), slog.Bool("dev_login", devLogin), slog.Bool("public_home", home != nil))
+}
+
+// rootHandler serves the injected public home to anonymous visitors at exactly
+// "/", and routes everything else — signed-in users and every dashboard sub-path —
+// to the gated dashboard (which still redirects an anonymous non-root request to
+// /login). This is the anon-home / authed-app split at the site root.
+func rootHandler(authLayer *auth.Auth, gated http.Handler, home http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && !authLayer.Authenticated(r) {
+			home(w, r)
+			return
+		}
+		gated.ServeHTTP(w, r)
+	})
 }
 
 // mountIngest attaches the body-capped Connect/gRPC ingest handler. The zstd
@@ -245,7 +328,7 @@ type ingestWiring struct {
 // MAPING_POSTGRES_DSN is set (real key resolution + plan-driven guardrails), and
 // falls back to the static dev-key resolver with default guardrails otherwise so
 // local dev and the existing tests need no Postgres.
-func buildIngestWiring(ctx context.Context, log *slog.Logger) (ingestWiring, error) {
+func buildIngestWiring(ctx context.Context, log *slog.Logger, limitFactory LimitProviderFactory, migrations []migrationSource) (ingestWiring, error) {
 	pgDSN := os.Getenv("MAPING_POSTGRES_DSN")
 	if pgDSN == "" {
 		log.Warn("no control plane (MAPING_POSTGRES_DSN unset): using static dev-key resolver and default guardrails")
@@ -255,7 +338,14 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger) (ingestWiring, err
 		}, nil
 	}
 
-	store, err := control.New(ctx, pgDSN)
+	// A composing build's extra migration sources (paid tiers, billing schema)
+	// apply after the embedded core migrations, layering commercial schema on top
+	// of the core without the core carrying it.
+	ctrlOpts := make([]control.Option, 0, len(migrations))
+	for _, m := range migrations {
+		ctrlOpts = append(ctrlOpts, control.WithExtraMigrations(m.fsys, m.dir))
+	}
+	store, err := control.New(ctx, pgDSN, ctrlOpts...)
 	if err != nil {
 		return ingestWiring{}, fmt.Errorf("control plane: %w", err)
 	}
@@ -268,8 +358,16 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger) (ingestWiring, err
 		return ingestWiring{}, fmt.Errorf("seed dev key: %w", err)
 	}
 
-	limits := limitProvider{store: store}
-	rl := guardrail.NewRateLimiter(limits)
+	// The core provider is billing-blind (plain plan budget). A composing build
+	// decorates it via WithLimitProvider (adding, e.g., the subscription
+	// lifecycle); the public default leaves it untouched. Every ingest
+	// guardrail resolves through this single provider so the decorator applies
+	// uniformly to rate, cardinality, and payload.
+	var provider guardrail.LimitProvider = limitProvider{store: store}
+	if limitFactory != nil {
+		provider = limitFactory(provider, store.Pool())
+	}
+	rl := guardrail.NewRateLimiter(provider)
 	card := guardrail.NewCardinality()
 
 	opts := []ingest.Option{
@@ -278,14 +376,14 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger) (ingestWiring, err
 		//nolint:contextcheck // intentional detached context: the limiter must not inherit a request deadline.
 		ingest.WithLimiter(func(tenant string) bool { return rl.Allow(context.Background(), tenant) }),
 		ingest.WithCardinality(card.Allow, func(ctx context.Context, tenant string) int {
-			l, _ := limits.Limits(ctx, tenant)
+			l, _ := provider.Limits(ctx, tenant)
 			return l.CardinalityCap
 		}),
 		// Enforce the plan's max_payload_bytes as the logical/fairness bound
 		// after auth; the HTTP-layer ceiling above is the hard
 		// pre-auth memory bound. Fed from the same control-plane limits.
 		ingest.WithPayloadLimit(func(ctx context.Context, tenant string) int64 {
-			l, _ := limits.Limits(ctx, tenant)
+			l, _ := provider.Limits(ctx, tenant)
 			return l.MaxPayloadBytes
 		}),
 		// Persist handshakes so the dashboard onboarding panel shows connected

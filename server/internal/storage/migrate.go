@@ -12,7 +12,8 @@ import (
 )
 
 // migrationsFS embeds the ClickHouse DDL that defines the data plane: the raw
-// summaries tier (0001) and the rollup tiers + materialized views + TTLs (0002).
+// summaries tier (0001), the rollup tiers + materialized views + TTLs (0002),
+// and the per-instance USE gauges table (0003).
 // The set is closed and internal (see tier.go); the files are the single source
 // of truth for the schema, shared with the storage integration test.
 //

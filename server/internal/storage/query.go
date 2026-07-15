@@ -153,6 +153,26 @@ func (q TenantQuery) InstancesForEndpoint(
 	return InstancesForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
 }
 
+// VersionsForEndpoint forwards to the package-level per-deploy-version breakdown
+// for the bound tenant.
+func (q TenantQuery) VersionsForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) ([]VersionStat, error) {
+	return VersionsForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// ExemplarsForEndpoint forwards to the package-level raw-tier exemplar breadcrumb
+// query for the bound tenant.
+func (q TenantQuery) ExemplarsForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) ([]ExemplarRow, error) {
+	return ExemplarsForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
 // LatencyByStatusClass forwards to the package-level per-class latency split for
 // the bound tenant.
 func (q TenantQuery) LatencyByStatusClass(
@@ -161,6 +181,100 @@ func (q TenantQuery) LatencyByStatusClass(
 	from, to time.Time,
 ) (map[string]ClassLatency, error) {
 	return LatencyByStatusClass(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// ErrorClassesForEndpoint forwards to the package-level error-class breakdown for
+// the bound tenant.
+func (q TenantQuery) ErrorClassesForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) ([]ErrorClassStat, error) {
+	return ErrorClassesForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// NoStatusReasonsForEndpoint forwards to the package-level NO_STATUS reason
+// breakdown for the bound tenant.
+func (q TenantQuery) NoStatusReasonsForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) ([]NoStatusReasonStat, error) {
+	return NoStatusReasonsForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// PerformanceStats forwards to the package-level performance basis (represented
+// requests, shipped summaries, estimated summary disk) for the bound tenant.
+func (q TenantQuery) PerformanceStats(
+	ctx context.Context,
+	from, to time.Time,
+) (PerformanceStat, error) {
+	return PerformanceStats(ctx, q.s.conn, q.tenant, from, to)
+}
+
+// InstanceResourcesForService forwards to the package-level per-instance USE
+// gauge breakdown for the bound tenant.
+func (q TenantQuery) InstanceResourcesForService(
+	ctx context.Context,
+	service string,
+	from, to time.Time,
+) ([]InstanceResourceStat, error) {
+	return InstanceResourcesForService(ctx, q.s.conn, q.tenant, service, from, to)
+}
+
+// DownstreamForEndpoint forwards to the package-level self-vs-downstream time
+// split for the bound tenant.
+func (q TenantQuery) DownstreamForEndpoint(
+	ctx context.Context,
+	service, method, route string,
+	from, to time.Time,
+) (DownstreamStat, error) {
+	return DownstreamForEndpoint(ctx, q.s.conn, q.tenant, service, method, route, from, to)
+}
+
+// scanRows drains every row into a slice, scanning each into a fresh T through
+// cols (which returns the scan destinations for one value), and wraps scan and
+// iteration errors with the caller's op name (e.g. "Services" ->
+// "storage.Services: scan: ..."). It collapses the identical
+// for-rows.Next/Scan/append/rows.Err boilerplate every list query repeats.
+func scanRows[T any](rows driver.Rows, op string, cols func(*T) []any) ([]T, error) {
+	var out []T
+	for rows.Next() {
+		var v T
+		if err := rows.Scan(cols(&v)...); err != nil {
+			return nil, fmt.Errorf("storage.%s: scan: %w", op, err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage.%s: rows: %w", op, err)
+	}
+	return out, nil
+}
+
+// buildSeriesQuery resolves the rollup tier and step for the window [from, to)
+// and returns the ready-to-run percentile SQL plus the bucket step in seconds.
+// It does no I/O, so the tier selection, step flooring, table-allowlist guard
+// (the belt-and-suspenders against ever interpolating an unvetted table name),
+// and step validation are all unit-testable without a ClickHouse connection.
+func buildSeriesQuery(from, to time.Time, step time.Duration) (query string, stepSeconds int64, err error) {
+	// Pick the rollup tier from the window width and floor the step to the
+	// tier's granularity so a coarse tier is never queried at a finer step than
+	// it stores.
+	t := selectTier(from, to)
+	if step < t.minStep {
+		step = t.minStep
+	}
+	if _, ok := tierTables[t.table]; !ok {
+		// Unreachable for the closed tier set; asserts the invariant so a future
+		// edit can never let an unvetted name reach SQL.
+		return "", 0, fmt.Errorf("storage.SeriesOverTime: unknown tier table %q", t.table)
+	}
+	stepSeconds = int64(step / time.Second)
+	if stepSeconds <= 0 {
+		return "", 0, fmt.Errorf("storage.SeriesOverTime: step must be >= 1s, got %s", step)
+	}
+	return fmt.Sprintf(seriesQueryTemplate, t.table), stepSeconds, nil
 }
 
 // SeriesOverTime returns the per-time-bucket RED distribution for a series over
@@ -176,23 +290,9 @@ func SeriesOverTime(
 	from, to time.Time,
 	step time.Duration,
 ) ([]TimePoint, error) {
-	// Pick the rollup tier from the window width and floor the step to the
-	// tier's granularity so a coarse tier is never queried at a finer step than
-	// it stores.
-	t := selectTier(from, to)
-	if step < t.minStep {
-		step = t.minStep
-	}
-	if _, ok := tierTables[t.table]; !ok {
-		// Unreachable for the closed tier set; asserts the invariant so a future
-		// edit can never let an unvetted name reach SQL.
-		return nil, fmt.Errorf("storage.SeriesOverTime: unknown tier table %q", t.table)
-	}
-	query := fmt.Sprintf(seriesQueryTemplate, t.table)
-
-	stepSeconds := int64(step / time.Second)
-	if stepSeconds <= 0 {
-		return nil, fmt.Errorf("storage.SeriesOverTime: step must be >= 1s, got %s", step)
+	query, stepSeconds, err := buildSeriesQuery(from, to, step)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := conn.Query(ctx, query,

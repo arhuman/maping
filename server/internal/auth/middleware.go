@@ -48,6 +48,15 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// Authenticated reports whether the request carries a valid session cookie,
+// without requiring the Middleware to have run. The composition root uses it at
+// "/" to serve the public home to anonymous visitors while routing signed-in
+// users to the dashboard.
+func (a *Auth) Authenticated(r *http.Request) bool {
+	_, ok := a.sessionFromRequest(r)
+	return ok
+}
+
 // sessionFromRequest reads and verifies the session cookie. A missing, expired,
 // or tampered cookie yields ok=false (treated as logged out).
 func (a *Auth) sessionFromRequest(r *http.Request) (Session, bool) {

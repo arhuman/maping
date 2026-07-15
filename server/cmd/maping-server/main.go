@@ -5,15 +5,17 @@
 // back to a static dev-key resolver and default guardrails so local dev needs
 // no Postgres.
 //
-// All wiring lives in internal/app (so it is unit-testable without Postgres);
-// this file is a thin shell that builds the logger and delegates to app.Run.
+// All wiring lives in the app package (so it is unit-testable without Postgres);
+// this file is a thin shell that builds the logger and delegates to app.Run. The
+// community binary passes no options, so it composes only the core surfaces; a
+// composed build would pass app.WithRoutes/app.WithBackgroundJob here.
 package main
 
 import (
 	"log/slog"
 	"os"
 
-	"github.com/arhuman/maping/server/internal/app"
+	"github.com/arhuman/maping/server/app"
 )
 
 func main() {

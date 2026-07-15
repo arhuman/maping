@@ -38,6 +38,30 @@ type fakeQuerier struct {
 
 	instances    []storage.InstanceStat
 	instancesErr error
+
+	versions    []storage.VersionStat
+	versionsErr error
+
+	exemplars    []storage.ExemplarRow
+	exemplarsErr error
+
+	classLatency    map[string]storage.ClassLatency
+	classLatencyErr error
+
+	errorClasses    []storage.ErrorClassStat
+	errorClassesErr error
+
+	noStatusReasons    []storage.NoStatusReasonStat
+	noStatusReasonsErr error
+
+	downstream    storage.DownstreamStat
+	downstreamErr error
+
+	resources    []storage.InstanceResourceStat
+	resourcesErr error
+
+	performance    storage.PerformanceStat
+	performanceErr error
 }
 
 // Tenant binds the fake to a tenant, returning a fakeScopedQuery over the same
@@ -66,6 +90,30 @@ func (s fakeScopedQuery) SeriesOverTime(context.Context, string, string, string,
 }
 func (s fakeScopedQuery) InstancesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.InstanceStat, error) {
 	return s.f.instances, s.f.instancesErr
+}
+func (s fakeScopedQuery) VersionsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.VersionStat, error) {
+	return s.f.versions, s.f.versionsErr
+}
+func (s fakeScopedQuery) ExemplarsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.ExemplarRow, error) {
+	return s.f.exemplars, s.f.exemplarsErr
+}
+func (s fakeScopedQuery) LatencyByStatusClass(context.Context, string, string, string, time.Time, time.Time) (map[string]storage.ClassLatency, error) {
+	return s.f.classLatency, s.f.classLatencyErr
+}
+func (s fakeScopedQuery) ErrorClassesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.ErrorClassStat, error) {
+	return s.f.errorClasses, s.f.errorClassesErr
+}
+func (s fakeScopedQuery) NoStatusReasonsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.NoStatusReasonStat, error) {
+	return s.f.noStatusReasons, s.f.noStatusReasonsErr
+}
+func (s fakeScopedQuery) DownstreamForEndpoint(context.Context, string, string, string, time.Time, time.Time) (storage.DownstreamStat, error) {
+	return s.f.downstream, s.f.downstreamErr
+}
+func (s fakeScopedQuery) InstanceResourcesForService(context.Context, string, time.Time, time.Time) ([]storage.InstanceResourceStat, error) {
+	return s.f.resources, s.f.resourcesErr
+}
+func (s fakeScopedQuery) PerformanceStats(context.Context, time.Time, time.Time) (storage.PerformanceStat, error) {
+	return s.f.performance, s.f.performanceErr
 }
 
 // constTenant is the Part-1 tenant resolver: always resolves the dev tenant.
@@ -210,7 +258,7 @@ func TestUnknownPathIs404(t *testing.T) {
 
 func TestEndpointsTable(t *testing.T) {
 	q := fakeQuerier{endpoints: []storage.EndpointStat{
-		{Method: "GET", Route: "/users/:id", Count: 100, ErrorRate: 0.01, P50: 0.01, P95: 0.1, P99: 0.3},
+		{Method: "GET", Route: "/users/:id", Count: 100, ErrorRate: 0.01, P50: 0.01, P95: 0.1, P99: 0.3, ReqBytesAvg: 128, RespBytesAvg: 2048},
 	}}
 	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
 	code, body := getBody(t, srv.URL+"/services/checkout-api")
@@ -220,6 +268,11 @@ func TestEndpointsTable(t *testing.T) {
 	assert.Contains(t, body, "method=GET")
 	// Default sort is traffic -> its header carries the active arrow.
 	assert.Contains(t, body, "TRAFFIC ▾")
+	// Byte-average columns render human-readably (128 B, 2 KB).
+	assert.Contains(t, body, "AVG REQ")
+	assert.Contains(t, body, "AVG RESP")
+	assert.Contains(t, body, "128 B")
+	assert.Contains(t, body, "2 KB")
 }
 
 func TestEndpointsSortAllowlist(t *testing.T) {
@@ -259,6 +312,139 @@ func TestEndpointDetailPage(t *testing.T) {
 	assert.Contains(t, body, "20.0%") // headline error rate (design pct format)
 	assert.Contains(t, body, "EXACT CODES")
 	assert.Contains(t, body, "c-err") // 20% >= threshold -> error colour class
+}
+
+// TestEndpointDetailInstancesPanel asserts the instance-outlier panel renders
+// each replica server-side with its own RED metrics and byte averages, so a bad
+// replica (pod-b: 75% errors) is visible without any client JS.
+func TestEndpointDetailInstancesPanel(t *testing.T) {
+	q := fakeQuerier{
+		detail: storage.EndpointDetail{Count: 140, ErrorRate: 0.05},
+		instances: []storage.InstanceStat{
+			{Instance: "pod-a", Count: 100, ErrorRate: 0.01, P50: 0.01, P95: 0.2, P99: 0.5, ReqBytesAvg: 128, RespBytesAvg: 2048},
+			{Instance: "pod-b", Count: 40, ErrorRate: 0.75, P50: 0.02, P95: 0.9, P99: 1.5, ReqBytesAvg: 130, RespBytesAvg: 4096},
+		},
+	}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "Instances")
+	// Both replicas render, ordered by instance (pod-a before pod-b).
+	assert.Contains(t, body, "pod-a")
+	assert.Contains(t, body, "pod-b")
+	assert.Less(t, strings.Index(body, "pod-a"), strings.Index(body, "pod-b"))
+	// The outlier's elevated error rate is rendered (design pct format).
+	assert.Contains(t, body, "75.0%")
+	// Byte averages render human-readably (2 KB, 4 KB).
+	assert.Contains(t, body, "2 KB")
+	assert.Contains(t, body, "4 KB")
+}
+
+// TestEndpointDetailVersionsPanel asserts the deploy-version panel renders each
+// version server-side with its own RED metrics, so a regressing release
+// (v1.1.0: 40% errors) is visible without any client JS, and that the DEBUG
+// CONTEXT line surfaces the dominant deploy_version (the highest-traffic one).
+func TestEndpointDetailVersionsPanel(t *testing.T) {
+	q := fakeQuerier{
+		detail: storage.EndpointDetail{Count: 300, ErrorRate: 0.10},
+		versions: []storage.VersionStat{
+			{Version: "v1.0.0", Count: 200, ErrorRate: 0.01, P50: 0.01, P95: 0.2, P99: 0.5},
+			{Version: "v1.1.0", Count: 100, ErrorRate: 0.40, P50: 0.02, P95: 0.9, P99: 1.5},
+		},
+	}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "Versions")
+	// Both versions render, in storage order (v1.0.0 before v1.1.0).
+	assert.Contains(t, body, "v1.0.0")
+	assert.Contains(t, body, "v1.1.0")
+	assert.Less(t, strings.Index(body, "v1.0.0"), strings.Index(body, "v1.1.0"))
+	// The regressing release's elevated error rate renders (design pct format).
+	assert.Contains(t, body, "40.0%")
+	// The DEBUG CONTEXT line surfaces the dominant version (v1.0.0, most traffic).
+	debug := body[strings.Index(body, "DEBUG CONTEXT"):]
+	assert.Contains(t, debug, "version v1.0.0")
+}
+
+// TestEndpointDetailExemplarsPanel asserts the exemplars panel renders each
+// captured request server-side (time, status, latency, ids), that a non-empty
+// trace/request id is shown and carried in full for the copy button, and that an
+// exemplar with empty ids renders the em-dash placeholder — all with no client JS.
+func TestEndpointDetailExemplarsPanel(t *testing.T) {
+	at := time.Date(2026, 7, 13, 14, 30, 15, 0, time.UTC)
+	q := fakeQuerier{
+		detail: storage.EndpointDetail{Count: 100, ErrorRate: 0.05},
+		exemplars: []storage.ExemplarRow{
+			// A slow error with full trace/request ids.
+			{At: at, DurationNs: 1_500_000_000, StatusCode: 500, TraceID: "trace-abcdef0123456789", SpanID: "span-1", RequestID: "req-abcdef0123456789"},
+			// A fast success with no ids captured -> em-dash cells.
+			{At: at.Add(-time.Minute), DurationNs: 12_000_000, StatusCode: 200, TraceID: "", SpanID: "", RequestID: ""},
+		},
+	}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "Exemplars")
+	assert.Contains(t, body, "jump from a spike to a real request")
+	// Scope assertions to the exemplars panel so they key on the new panel, not
+	// on the headline or other panels.
+	ex := body[strings.Index(body, "Exemplars"):]
+	// The compact UTC time renders.
+	assert.Contains(t, ex, "14:30:15")
+	// The full trace/request ids are present (kept whole for the copy button).
+	assert.Contains(t, ex, "trace-abcdef0123456789")
+	assert.Contains(t, ex, "req-abcdef0123456789")
+	// The slow exemplar's latency renders through the shared formatter (1.5 s).
+	assert.Contains(t, ex, "1.50 s")
+	// The copy buttons reuse the existing data-copy mechanism (no new JS).
+	assert.Contains(t, ex, "data-copy=\"mp-ex-tr-0\"")
+	assert.Contains(t, ex, "data-copy=\"mp-ex-rq-0\"")
+	// The empty-id exemplar renders the em-dash placeholder.
+	assert.Contains(t, ex, "—")
+}
+
+// TestEndpointDetailExemplarsEmpty asserts the empty-state row renders when no
+// exemplars are captured in the window.
+func TestEndpointDetailExemplarsEmpty(t *testing.T) {
+	q := fakeQuerier{detail: storage.EndpointDetail{Count: 100, ErrorRate: 0.05}}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "No exemplars captured in this window.")
+}
+
+// TestEndpointDetailStatusClassSplit asserts the success-vs-error latency split
+// renders one row per traffic-carrying status class (with its per-class request
+// count) server-side, and omits zero-traffic classes.
+func TestEndpointDetailStatusClassSplit(t *testing.T) {
+	q := fakeQuerier{
+		detail: storage.EndpointDetail{Count: 100, ErrorRate: 0.20},
+		classLatency: map[string]storage.ClassLatency{
+			"STATUS_CLASS_2XX": {Count: 80, P50: 0.01, P95: 0.05, P99: 0.1},
+			"STATUS_CLASS_5XX": {Count: 20, P50: 0.5, P95: 1.2, P99: 2.0},
+			// 3xx/4xx/no_status have no traffic and must be omitted.
+			"STATUS_CLASS_3XX": {},
+		},
+	}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+
+	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "Latency by status class")
+	// The split panel renders a row per class with traffic; use a distinctive
+	// per-class latency (2.0 s p99 on 5xx) to key on the split, not the headline.
+	assert.Contains(t, body, "2.00 s")
+	// The 5xx row carries its own request count.
+	split := body[strings.Index(body, "Latency by status class"):]
+	assert.Contains(t, split, ">5xx<")
+	assert.Contains(t, split, ">2xx<")
+	// A zero-traffic class (3xx) is omitted from the split.
+	assert.NotContains(t, split, ">3xx<")
 }
 
 func TestSeriesJSON(t *testing.T) {

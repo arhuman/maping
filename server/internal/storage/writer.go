@@ -19,11 +19,31 @@ import (
 const insertStmt = `INSERT INTO summaries (
     tenant, service, instance, method, route_template, status_class,
     window_start, window_end, count, sum_duration_ns, req_bytes, resp_bytes,
-    latency_sketch, status_codes
+    latency_sketch, status_codes,
+    deploy_version, deploy_id, environment, region, instance_start_time,
+    max_duration_ns, exemplars,
+    error_classes, no_status_reasons,
+    sum_downstream_duration_ns
+)`
+
+// instanceWindowInsertStmt inserts one batch of per-instance USE gauges into the
+// separate instance_windows table (see 0003). The column order matches the Append
+// below.
+const instanceWindowInsertStmt = `INSERT INTO instance_windows (
+    tenant, service, instance, window_start, window_end,
+    cpu_ns, rss_bytes, heap_alloc_bytes, gc_pause_ns, goroutines
 )`
 
 // ErrWriterClosed is returned by Enqueue after Close has been called.
 var ErrWriterClosed = errors.New("storage: writer closed")
+
+// ErrEmptyTenant is returned by the enqueue methods when a row carries the
+// zero-value tenant.ID. Rows are normally built from a resolved tenant (see
+// ingest.summaryToRow), so the type already keeps an unvalidated tenant out of a
+// query; this guards the one hole the type leaves open — a row struct-literal'd
+// with the zero ID — so an un-tenanted write fails closed instead of silently
+// persisting under an empty tenant. It is the write-path half of ADR-0010.
+var ErrEmptyTenant = errors.New("storage: row has empty tenant")
 
 // Writer batches Row inserts into ClickHouse. A single background goroutine
 // drains an unbounded-intent buffered channel and flushes on either the flush
@@ -36,8 +56,9 @@ type Writer struct {
 	log      *slog.Logger
 
 	rows   chan Row
-	done   chan struct{} // closed when the run loop has exited.
-	closed chan struct{} // closed by Close to signal drain-and-stop.
+	iwRows chan InstanceWindowRow // separate USE-gauge stream (instance_windows).
+	done   chan struct{}          // closed when the run loop has exited.
+	closed chan struct{}          // closed by Close to signal drain-and-stop.
 
 	closeOnce sync.Once
 }
@@ -83,6 +104,7 @@ func newWriterWithConn(conn driver.Conn, cfg Config, log *slog.Logger) *Writer {
 		cfg:    cfg,
 		log:    log,
 		rows:   make(chan Row, cfg.FlushRows),
+		iwRows: make(chan InstanceWindowRow, cfg.FlushRows),
 		done:   make(chan struct{}),
 		closed: make(chan struct{}),
 	}
@@ -105,10 +127,16 @@ func (w *Writer) QueryService() *QueryService {
 	return NewQueryService(w.conn)
 }
 
-// Enqueue hands a row to the batcher. It returns ErrWriterClosed once Close has
+// Enqueue hands a row to the batcher. It returns ErrEmptyTenant if the row has
+// no tenant (fail-closed, never persisted) and ErrWriterClosed once Close has
 // been called. It never blocks indefinitely: if the buffer is full it blocks
 // only until the batcher drains, which is bounded by the flush cadence.
+//
+//nolint:dupl // intentionally parallel to EnqueueInstanceWindow: two independent batcher streams with identical guard/close semantics; a generic merge would obscure the two-channel design.
 func (w *Writer) Enqueue(row Row) error {
+	if row.Tenant.IsZero() {
+		return ErrEmptyTenant
+	}
 	select {
 	case <-w.closed:
 		return ErrWriterClosed
@@ -116,6 +144,28 @@ func (w *Writer) Enqueue(row Row) error {
 	}
 	select {
 	case w.rows <- row:
+		return nil
+	case <-w.closed:
+		return ErrWriterClosed
+	}
+}
+
+// EnqueueInstanceWindow hands one USE-gauge row to the batcher's instance-window
+// stream. Like Enqueue it returns ErrWriterClosed after Close and never blocks
+// indefinitely (bounded by the flush cadence).
+//
+//nolint:dupl // intentionally parallel to Enqueue: two independent batcher streams with identical guard/close semantics; a generic merge would obscure the two-channel design.
+func (w *Writer) EnqueueInstanceWindow(row InstanceWindowRow) error {
+	if row.Tenant.IsZero() {
+		return ErrEmptyTenant
+	}
+	select {
+	case <-w.closed:
+		return ErrWriterClosed
+	default:
+	}
+	select {
+	case w.iwRows <- row:
 		return nil
 	case <-w.closed:
 		return ErrWriterClosed
@@ -137,6 +187,48 @@ func (w *Writer) Close(ctx context.Context) error {
 	}
 }
 
+// flushBatch inserts *batch drop-on-failure: on error it logs and discards so a
+// bad or stalled ClickHouse cannot wedge live ingest (fail-open on the data
+// plane). The insert is timeout-bounded (cfg.InsertTimeout), so a hung
+// connection surfaces as a deadline error rather than blocking the batcher. It
+// always empties *batch. Generic over the two batch element types so the summary
+// and instance-window streams share one flush.
+func flushBatch[T any](batch *[]T, insert func([]T) error, log *slog.Logger, what string) {
+	if len(*batch) == 0 {
+		return
+	}
+	if err := insert(*batch); err != nil {
+		log.Error("storage: "+what+" insert failed, dropping",
+			slog.Int("rows", len(*batch)), slog.Any("err", err))
+	}
+	*batch = (*batch)[:0]
+}
+
+// finalFlushBatch is the close-path flush: unlike flushBatch it retries up to
+// finalFlushAttempts times (short backoff between tries) before dropping, so a
+// deploy restart does not silently lose the last buffered batch. It stays
+// time-bounded and always empties *batch.
+func finalFlushBatch[T any](batch *[]T, insert func([]T) error, log *slog.Logger, what string) {
+	if len(*batch) == 0 {
+		return
+	}
+	var err error
+	for attempt := 1; attempt <= finalFlushAttempts; attempt++ {
+		if err = insert(*batch); err == nil {
+			*batch = (*batch)[:0]
+			return
+		}
+		log.Warn("storage: "+what+" final drain insert failed, retrying",
+			slog.Int("attempt", attempt), slog.Int("rows", len(*batch)), slog.Any("err", err))
+		if attempt < finalFlushAttempts {
+			time.Sleep(finalFlushBackoff)
+		}
+	}
+	log.Error("storage: "+what+" final drain insert failed after retries, dropping",
+		slog.Int("rows", len(*batch)), slog.Any("err", err))
+	*batch = (*batch)[:0]
+}
+
 // run is the single batcher goroutine. It accumulates rows and flushes on the
 // row threshold or the ticker, and performs a final drain on close.
 //
@@ -149,21 +241,7 @@ func (w *Writer) run() {
 
 	batch := make([]Row, 0, w.cfg.FlushRows)
 
-	flush := func() {
-		if len(batch) == 0 {
-			return
-		}
-		if err := w.timedInsert(batch); err != nil {
-			// Explicit drop-on-failure: log and discard so a bad or stalled
-			// ClickHouse does not wedge the ingest path (fail-open on the data
-			// plane). The insert is timeout-bounded (cfg.InsertTimeout), so a hung
-			// connection surfaces here as a deadline error rather than blocking the
-			// batcher goroutine forever. Durable retry is deferred to a later milestone.
-			w.log.Error("storage: batch insert failed, dropping",
-				slog.Int("rows", len(batch)), slog.Any("err", err))
-		}
-		batch = batch[:0]
-	}
+	flush := func() { flushBatch(&batch, w.timedInsert, w.log, "batch") }
 
 	add := func(row Row) {
 		batch = append(batch, row)
@@ -172,55 +250,50 @@ func (w *Writer) run() {
 		}
 	}
 
-	// finalFlush is the close-path flush. Unlike the steady-state flush (which
-	// drops immediately so a bad ClickHouse cannot wedge live ingest), the final
-	// drain retries a bounded number of times before giving up, so a deploy
-	// restart does not silently lose the last buffered batch. It
-	// stays time-bounded: at most finalFlushAttempts tries with a short backoff.
-	finalFlush := func() {
-		if len(batch) == 0 {
-			return
+	finalFlush := func() { finalFlushBatch(&batch, w.timedInsert, w.log, "batch") }
+
+	// Instance-window (USE gauge) stream: a parallel low-volume batch with the same
+	// drop-on-failure steady flush and bounded-retry final flush as the summaries
+	// above, kept separate because it targets a different table.
+	iwBatch := make([]InstanceWindowRow, 0, w.cfg.FlushRows)
+	iwFlush := func() { flushBatch(&iwBatch, w.timedInsertInstanceWindows, w.log, "instance-window") }
+	iwAdd := func(row InstanceWindowRow) {
+		iwBatch = append(iwBatch, row)
+		if len(iwBatch) >= w.cfg.FlushRows {
+			iwFlush()
 		}
-		var err error
-		for attempt := 1; attempt <= finalFlushAttempts; attempt++ {
-			if err = w.timedInsert(batch); err == nil {
-				batch = batch[:0]
-				return
-			}
-			w.log.Warn("storage: final drain insert failed, retrying",
-				slog.Int("attempt", attempt), slog.Int("rows", len(batch)), slog.Any("err", err))
-			if attempt < finalFlushAttempts {
-				time.Sleep(finalFlushBackoff)
-			}
-		}
-		w.log.Error("storage: final drain insert failed after retries, dropping",
-			slog.Int("rows", len(batch)), slog.Any("err", err))
-		batch = batch[:0]
 	}
+	iwFinalFlush := func() { finalFlushBatch(&iwBatch, w.timedInsertInstanceWindows, w.log, "instance-window") }
 
 	for {
 		select {
 		case row := <-w.rows:
 			add(row)
+		case iw := <-w.iwRows:
+			iwAdd(iw)
 		case <-ticker.C:
 			flush()
+			iwFlush()
 		case <-w.closed:
-			w.drain(add, finalFlush)
+			w.drain(add, finalFlush, iwAdd, iwFinalFlush)
 			return
 		}
 	}
 }
 
-// drain empties the buffered channel into the batch (flushing on threshold) and
-// performs a final flush. Called once on close; finalFlush is the bounded-retry
-// flush closure supplied by run.
-func (w *Writer) drain(add func(Row), finalFlush func()) {
+// drain empties both buffered channels into their batches (flushing on
+// threshold) and performs a final flush of each. Called once on close; the
+// finalFlush closures are the bounded-retry flushes supplied by run.
+func (w *Writer) drain(add func(Row), finalFlush func(), iwAdd func(InstanceWindowRow), iwFinalFlush func()) {
 	for {
 		select {
 		case row := <-w.rows:
 			add(row)
+		case iw := <-w.iwRows:
+			iwAdd(iw)
 		default:
 			finalFlush()
+			iwFinalFlush()
 			return
 		}
 	}
@@ -234,6 +307,40 @@ func (w *Writer) timedInsert(rows []Row) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.InsertTimeout)
 	defer cancel()
 	return w.insert(ctx, rows)
+}
+
+// timedInsertInstanceWindows runs one USE-gauge batch insert bounded by
+// cfg.InsertTimeout, mirroring timedInsert for the summaries stream.
+func (w *Writer) timedInsertInstanceWindows(rows []InstanceWindowRow) error {
+	ctx, cancel := context.WithTimeout(context.Background(), w.cfg.InsertTimeout)
+	defer cancel()
+	return w.insertInstanceWindows(ctx, rows)
+}
+
+// insertInstanceWindows writes one batch of USE gauges into instance_windows with
+// the same async_insert settings as the summaries insert.
+func (w *Writer) insertInstanceWindows(ctx context.Context, rows []InstanceWindowRow) error {
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"async_insert":          1,
+		"wait_for_async_insert": 1,
+	}))
+
+	batch, err := w.conn.PrepareBatch(ctx, instanceWindowInsertStmt)
+	if err != nil {
+		return fmt.Errorf("prepare instance-window batch: %w", err)
+	}
+	for _, r := range rows {
+		if err := batch.Append(
+			r.Tenant.String(), r.Service, r.Instance, r.WindowStart, r.WindowEnd,
+			r.CPUNs, r.RSSBytes, r.HeapAllocBytes, r.GCPauseNs, r.Goroutines,
+		); err != nil {
+			return fmt.Errorf("append instance-window row: %w", err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		return fmt.Errorf("send instance-window batch: %w", err)
+	}
+	return nil
 }
 
 // insert writes one batch via a prepared ClickHouse batch with async_insert
@@ -253,6 +360,10 @@ func (w *Writer) insert(ctx context.Context, rows []Row) error {
 			r.Tenant.String(), r.Service, r.Instance, r.Method, r.RouteTemplate, r.StatusClass,
 			r.WindowStart, r.WindowEnd, r.Count, r.SumDurationNs, r.ReqBytes, r.RespBytes,
 			r.sketchMap(), r.statusCodeMap(),
+			r.DeployVersion, r.DeployID, r.Environment, r.Region, r.InstanceStart,
+			r.MaxDurationNs, r.exemplarTuples(),
+			r.errorClassMap(), r.noStatusReasonMap(),
+			r.SumDownstreamNs,
 		); err != nil {
 			return fmt.Errorf("append row: %w", err)
 		}
