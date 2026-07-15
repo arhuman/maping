@@ -287,6 +287,35 @@ func TestFlushBuildsRequestAndSwapsShards(t *testing.T) {
 	assert.Equal(t, 0, r.ring.Len())
 }
 
+// TestEnvelopeStampsDeployIdentity verifies the deploy dimension from Config and
+// the recorder's captured start time are stamped onto every built Envelope.
+func TestEnvelopeStampsDeployIdentity(t *testing.T) {
+	shards := new([numShards]shard)
+	for i := range shards {
+		shards[i].m = make(map[seriesKey]*series)
+	}
+	start := time.Now()
+	r := &Recorder{
+		cfg: Config{
+			Service: "svc", Instance: "inst", FlushWindow: time.Second,
+			DeployVersion: "v1.2.3", DeployID: "abc123sha",
+			Environment: "prod", Region: "eu-west-1",
+		},
+		startTime: start,
+		shards:    shards,
+		ring:      buffer.New(ringCapacity(time.Second)),
+	}
+	r.Observe(Record{Method: "GET", RouteTemplate: "/x", Status: 200, Duration: time.Millisecond})
+
+	req := r.buildRequest(r.swapShards(), time.Now())
+	env := req.Envelope
+	assert.Equal(t, "v1.2.3", env.DeployVersion)
+	assert.Equal(t, "abc123sha", env.DeployId)
+	assert.Equal(t, "prod", env.Environment)
+	assert.Equal(t, "eu-west-1", env.Region)
+	assert.Equal(t, start.UnixMilli(), env.InstanceStartTimeMs)
+}
+
 func TestRecorderLifecycleWithFakeTransport(t *testing.T) {
 	fake := &fakeTransport{}
 	cfg := Config{Service: "svc", Instance: "inst", FlushWindow: 50 * time.Millisecond}
@@ -406,6 +435,7 @@ func clearMapingEnv(t *testing.T) {
 	for _, k := range []string{
 		"MAPING_KEY", "MAPING_ENDPOINT", "MAPING_SERVICE",
 		"MAPING_INSTANCE", "MAPING_FLUSH_SECONDS", "OTEL_SERVICE_NAME", "HOSTNAME",
+		"MAPING_DEPLOY_VERSION", "MAPING_DEPLOY_ID", "MAPING_ENVIRONMENT", "MAPING_REGION",
 	} {
 		t.Setenv(k, "")
 	}

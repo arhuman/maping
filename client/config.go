@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -29,6 +30,14 @@ type Config struct {
 	Service     string
 	Instance    string
 	FlushWindow time.Duration
+
+	// Deploy identity. These are stored, low-cardinality dimensions stamped onto
+	// every Envelope (not the client-side series key), so the dashboard can ask
+	// "did release X regress this endpoint?".
+	DeployVersion string
+	DeployID      string
+	Environment   string
+	Region        string
 }
 
 // WithKey sets the ingest key (beats MAPING_KEY). The key encodes the tenant.
@@ -46,15 +55,32 @@ func WithInstance(instance string) Option { return func(c *Config) { c.Instance 
 // WithFlushWindow overrides the flush window (beats MAPING_FLUSH_SECONDS).
 func WithFlushWindow(d time.Duration) Option { return func(c *Config) { c.FlushWindow = d } }
 
+// WithDeployVersion overrides the release version (beats MAPING_DEPLOY_VERSION).
+func WithDeployVersion(v string) Option { return func(c *Config) { c.DeployVersion = v } }
+
+// WithDeployID overrides the build identity (beats MAPING_DEPLOY_ID). When left
+// unset it defaults to the VCS revision from the build info, if available.
+func WithDeployID(id string) Option { return func(c *Config) { c.DeployID = id } }
+
+// WithEnvironment overrides the deployment environment (beats MAPING_ENVIRONMENT).
+func WithEnvironment(env string) Option { return func(c *Config) { c.Environment = env } }
+
+// WithRegion overrides the deployment region (beats MAPING_REGION).
+func WithRegion(region string) Option { return func(c *Config) { c.Region = region } }
+
 // resolveConfig applies precedence: code option > env var > default. Code
 // options are applied last (into a struct pre-seeded from env/defaults) so a
 // non-zero option value wins; the zero value means "not set by code".
 func resolveConfig(opts []Option) Config {
 	c := Config{
-		Key:         os.Getenv("MAPING_KEY"),
-		Service:     deriveService(),
-		Instance:    deriveInstance(),
-		FlushWindow: deriveFlushWindow(),
+		Key:           os.Getenv("MAPING_KEY"),
+		Service:       deriveService(),
+		Instance:      deriveInstance(),
+		FlushWindow:   deriveFlushWindow(),
+		DeployVersion: os.Getenv("MAPING_DEPLOY_VERSION"),
+		DeployID:      deriveDeployID(),
+		Environment:   os.Getenv("MAPING_ENVIRONMENT"),
+		Region:        os.Getenv("MAPING_REGION"),
 	}
 
 	// Code options override only when they set a non-zero value.
@@ -73,6 +99,18 @@ func resolveConfig(opts []Option) Config {
 	}
 	if override.FlushWindow > 0 {
 		c.FlushWindow = override.FlushWindow
+	}
+	if override.DeployVersion != "" {
+		c.DeployVersion = override.DeployVersion
+	}
+	if override.DeployID != "" {
+		c.DeployID = override.DeployID
+	}
+	if override.Environment != "" {
+		c.Environment = override.Environment
+	}
+	if override.Region != "" {
+		c.Region = override.Region
 	}
 	// Endpoint precedence: WithEndpoint > MAPING_ENDPOINT > key-embedded origin >
 	// default. The key is resolved first (above) so its embedded origin is known.
@@ -132,6 +170,32 @@ func deriveInstance() string {
 		return h
 	}
 	return "unknown"
+}
+
+// deriveDeployID resolves the build identity: MAPING_DEPLOY_ID → the VCS
+// revision embedded in the build info (vcs.revision, present for VCS-stamped
+// builds). It returns empty when neither is available, leaving deploy_id unset
+// rather than guessing.
+func deriveDeployID() string {
+	if v := os.Getenv("MAPING_DEPLOY_ID"); v != "" {
+		return v
+	}
+	return vcsRevision()
+}
+
+// vcsRevision reads the vcs.revision setting from the embedded build info,
+// returning empty when the binary was built without VCS stamping.
+func vcsRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			return s.Value
+		}
+	}
+	return ""
 }
 
 // deriveFlushWindow parses MAPING_FLUSH_SECONDS, falling back to the default on

@@ -11,6 +11,27 @@ package maping.v1;
 
 option go_package = "github.com/arhuman/maping/proto/maping/v1;mapingv1";
 
+// NoStatusReason explains why a request ended without an HTTP status written
+// (StatusClass NO_STATUS). The client derives it from the request context and
+// writer state so a spike of aborted requests can be told apart — a client
+// disconnect vs. a server-side deadline vs. a write failure vs. a panic —
+// instead of collapsing them all into one opaque "no status" bucket.
+enum NoStatusReason {
+  // NO_STATUS_REASON_UNSPECIFIED is the proto3 default: no reason was derived.
+  NO_STATUS_REASON_UNSPECIFIED = 0;
+  // NO_STATUS_REASON_CONTEXT_CANCELED: the request context was canceled (e.g.
+  // the client disconnected) before a status was written.
+  NO_STATUS_REASON_CONTEXT_CANCELED = 1;
+  // NO_STATUS_REASON_CONTEXT_DEADLINE: the request context deadline fired first.
+  NO_STATUS_REASON_CONTEXT_DEADLINE = 2;
+  // NO_STATUS_REASON_WRITE_ERROR: the handler finished without writing a status.
+  NO_STATUS_REASON_WRITE_ERROR = 3;
+  // NO_STATUS_REASON_PANIC: the request aborted on a panic before a status.
+  NO_STATUS_REASON_PANIC = 4;
+  // NO_STATUS_REASON_OTHER: aborted for a reason none of the above capture.
+  NO_STATUS_REASON_OTHER = 5;
+}
+
 // StatusClass is the HTTP status bucket used as a series-key dimension.
 // Exact codes live in Summary.status_code_breakdown, never as a series label.
 enum StatusClass {
@@ -36,6 +57,22 @@ message Envelope {
   // dropped_summaries counts Summaries dropped by client backpressure since the
   // last successful upload, so the gap is visible rather than silent.
   uint64 dropped_summaries = 5;
+  // deploy_version is the release version (semver or image tag) the process is
+  // running. A stored, low-cardinality dimension used to answer "did release X
+  // regress this endpoint?" — NOT part of the client-side series key.
+  string deploy_version = 6;
+  // deploy_id is the immutable build identity (git SHA / CI build id), so two
+  // releases sharing a version string can still be told apart.
+  string deploy_id = 7;
+  // environment is the deployment environment (prod/staging/dev), a stored
+  // low-cardinality dimension.
+  string environment = 8;
+  // region is the deployment region (e.g. eu-west-1), a stored low-cardinality
+  // dimension.
+  string region = 9;
+  // instance_start_time_ms is the process boot wall-clock in epoch millis, so
+  // restarts can be correlated with a change in behavior.
+  int64 instance_start_time_ms = 10;
 }
 
 // Summary is one client-side aggregate for a single (endpoint, status-class)
@@ -58,12 +95,77 @@ message Summary {
   // status_code_breakdown is the exact-code detail (bounded, top-N) for the
   // endpoint-detail view. Not a series-key dimension.
   map<uint32, uint64> status_code_breakdown = 11;
+  // max_duration_ns is the exact slowest request observed in the window. Unlike
+  // the DDSketch percentiles (which are relative-error bounded), this is the
+  // true tail latency, merged across summaries with max.
+  uint64 max_duration_ns = 12;
+  // exemplars is a BOUNDED, best-effort sample of real requests from the window
+  // (the single slowest plus a few errors), so a user can pivot from a p99 or
+  // error spike to an actual request to open in their tracing tool or logs.
+  // They are breadcrumbs, not exact data: the client caps them per window and
+  // the server keeps them ONLY in the raw (finest) tier under its short TTL —
+  // rollups drop them. Not a series-key dimension.
+  repeated Exemplar exemplars = 13;
+  // error_class_breakdown is a bounded, top-N count of normalized error labels
+  // (uppercase [A-Z0-9_], <=64 chars) the app/framework attached to requests in
+  // the window, so a 5xx spike can be attributed to a cause ("DB_POOL_EXHAUSTED"
+  // vs "UPSTREAM_TIMEOUT"). Bounded per series like status_code_breakdown; not a
+  // series-key dimension.
+  map<string, uint64> error_class_breakdown = 14;
+  // no_status_reasons counts, by NoStatusReason, why requests ended without a
+  // status written (see StatusClass NO_STATUS): timing out vs canceling vs
+  // crashing. The key is the NoStatusReason enum value carried as uint32, since
+  // proto3 map keys cannot be enum-typed.
+  map<uint32, uint64> no_status_reasons = 15;
+  // sum_downstream_duration_ns is the summed time requests in the window spent
+  // waiting on downstream calls (outbound HTTP, and later DB/cache), so the
+  // endpoint's own time can be split from time it was merely blocked on a
+  // dependency — "the extra 45ms is all downstream". It is a scalar sum captured
+  // by the maping RoundTripper; requests that make no downstream calls (or a
+  // service that does not wire the RoundTripper) contribute zero, so the panel
+  // feature-gates on data presence.
+  uint64 sum_downstream_duration_ns = 16;
+}
+
+// Exemplar is one real request pinned to a Summary as a debugging breadcrumb.
+// Every field except duration is best-effort: trace/span/request ids are filled
+// only when the adapter can extract them (e.g. a W3C traceparent header), and
+// are empty otherwise. Exemplars are bounded per window and live only in the
+// raw tier (see Summary.exemplars).
+message Exemplar {
+  int64 at_ms = 1;          // request completion wall-clock, epoch millis
+  uint64 duration_ns = 2;   // request latency
+  uint32 status_code = 3;   // exact HTTP status (0 when none was written)
+  string trace_id = 4;      // W3C/OTel trace id (32 hex chars), optional
+  string span_id = 5;       // W3C/OTel span id (16 hex chars), optional
+  string request_id = 6;    // app request id (e.g. X-Request-Id), optional
 }
 
 // UploadRequest is one batched, fire-and-forget upload.
 message UploadRequest {
   Envelope envelope = 1;
   repeated Summary summaries = 2;
+  // instance_windows carries per-process resource gauges (USE: CPU, memory,
+  // goroutines, GC pause) sampled once per flush window, so a latency rise can be
+  // correlated with saturation ("p99 rose because GC pauses tripled") without a
+  // release. It is a separate stream from the per-endpoint summaries and is stored
+  // in its own table; typically one entry per upload.
+  repeated InstanceWindow instance_windows = 3;
+}
+
+// InstanceWindow is one process-level resource snapshot over a flush window: the
+// USE-style saturation gauges the client samples from the Go runtime. Cumulative
+// counters (cpu_ns, gc_pause_ns) are reported as the DELTA over the window; the
+// rest are point-in-time reads at sample time. Every field is best-effort and may
+// be zero (e.g. cpu_ns on a platform where process CPU time is unavailable).
+message InstanceWindow {
+  int64 window_start_ms = 1;      // window start, epoch millis (client wall clock)
+  int64 window_end_ms = 2;        // window end, epoch millis
+  uint64 cpu_ns = 3;              // process CPU time consumed during the window
+  uint64 rss_bytes = 4;           // resident memory proxy (runtime Sys bytes)
+  uint64 heap_alloc_bytes = 5;    // live heap bytes at sample time
+  uint64 gc_pause_ns = 6;         // GC stop-the-world pause time during the window
+  uint64 goroutines = 7;          // goroutine count at sample time
 }
 
 message UploadResponse {
