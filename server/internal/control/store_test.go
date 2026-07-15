@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -88,6 +89,11 @@ func (r fakeRow) Scan(dest ...any) error {
 			*d = r.values[i].(int32)
 		case *int64:
 			*d = r.values[i].(int64)
+		case *bool:
+			*d = r.values[i].(bool)
+		case **time.Time:
+			// Nullable timestamptz: the stored value is a *time.Time (nil for NULL).
+			*d = r.values[i].(*time.Time)
 		default:
 			return errUnsupportedScan
 		}
@@ -122,17 +128,25 @@ func (q *scriptedQuerier) Exec(_ context.Context, _ string, _ ...any) (pgconn.Co
 	return pgconn.CommandTag{}, nil
 }
 
-func TestQueryLimitsFound(t *testing.T) {
-	q := &scriptedQuerier{rows: []fakeRow{
-		{values: []any{100.0, 200, 10000, int64(4194304), 30}},
+// limitsRow builds the 6-column row queryLimits scans: the org plan followed by
+// the plan_limits budget (max_rps, burst, cardinality_cap, max_payload_bytes,
+// retention_days). The lookup resolves only the plan budget — no other columns.
+func limitsRow(plan string, budget guardrail.Limits) fakeRow {
+	return fakeRow{values: []any{
+		plan,
+		budget.MaxRPS, budget.Burst, budget.CardinalityCap, budget.MaxPayloadBytes, budget.RetentionDays,
 	}}
+}
+
+func TestQueryLimitsFound(t *testing.T) {
+	proBudget := guardrail.Limits{MaxRPS: 500, Burst: 1000, CardinalityCap: 100000, MaxPayloadBytes: 4194304, RetentionDays: 90}
+	q := &scriptedQuerier{rows: []fakeRow{limitsRow("pro", proBudget)}}
 	got, err := queryLimits(context.Background(), q, "org-1")
 	if err != nil {
 		t.Fatalf("queryLimits: %v", err)
 	}
-	want := guardrail.Limits{MaxRPS: 100, Burst: 200, CardinalityCap: 10000, MaxPayloadBytes: 4194304, RetentionDays: 30}
-	if got != want {
-		t.Errorf("queryLimits = %+v, want %+v", got, want)
+	if got != proBudget {
+		t.Errorf("queryLimits = %+v, want %+v", got, proBudget)
 	}
 }
 

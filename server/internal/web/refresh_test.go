@@ -62,7 +62,8 @@ func TestOverviewTriageSortForUnhealthy(t *testing.T) {
 	}})
 	_, body2 := getBody(t, healthy.URL+"/")
 	assert.NotContains(t, body2, "sort=error")
-	assert.Contains(t, body2, `href="/services/billing"`)
+	// The drill href carries the active window so navigation preserves the lookback.
+	assert.Contains(t, body2, `href="/services/billing?win=1h"`)
 }
 
 func TestDetailRendersDebugContext(t *testing.T) {
@@ -105,4 +106,30 @@ func TestPerformanceHasNoRefreshMeta(t *testing.T) {
 	code, body := getBody(t, srv.URL+"/performance")
 	assert.Equal(t, http.StatusOK, code)
 	assert.NotContains(t, body, `http-equiv="refresh"`)
+}
+
+func TestPerformancePageShowsRealData(t *testing.T) {
+	q := fakeQuerier{
+		hasData:     true,
+		performance: storage.PerformanceStat{Requests: 4_400_000, Summaries: 1000, SummaryDiskBytes: 400_000},
+	}
+	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
+	code, body := getBody(t, srv.URL+"/performance")
+	assert.Equal(t, http.StatusOK, code)
+	// The measured compression and represented-request count reach the HTML.
+	assert.Contains(t, body, "4.4k×")
+	assert.Contains(t, body, "4.4M")
+	// The old hardcoded illustrative figures are gone.
+	assert.NotContains(t, body, "47.2 GB")
+	assert.NotContains(t, body, "182")
+}
+
+func TestPerformancePageEmptyState(t *testing.T) {
+	srv := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant})
+	// The page honours the selected window: the empty-state copy names it.
+	code, body := getBody(t, srv.URL+"/performance?win=24h")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "No summaries stored in the last 24 hours yet")
+	// The window switcher is shown on Performance (it drives the figures).
+	assert.Contains(t, body, "/performance?win=5m")
 }

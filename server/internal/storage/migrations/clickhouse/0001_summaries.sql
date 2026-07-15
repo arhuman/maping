@@ -25,16 +25,64 @@
 -- collapse; the wider sort key stops per-instance / per-method rows collapsing at
 -- all.
 --
--- ApplyMigrations re-runs every .sql on startup and relies on CREATE ... IF NOT
--- EXISTS for idempotency, so it will NOT upgrade a table that already exists. A
--- pre-existing dev instance carrying the OLD schema must be reset ONCE by hand
--- (data is disposable pre-GA); this migration deliberately does NOT automate the
--- drop, so it can never wipe data on a routine restart:
+-- DEPLOY DIMENSION (v0.1.0, pre-GA, disposable data)
+-- ---------------------------------------------------------------------------
+-- deploy_version / deploy_id / environment / region are LowCardinality(String)
+-- stored dimensions carried from the Envelope, and instance_start_time is a
+-- SimpleAggregateFunction(max, DateTime64(3)) correlating restarts. deploy_version
+-- is ALSO added to the ORDER BY (right before window_start) so rows from different
+-- releases never collapse/sum together — this is what makes per-version RED
+-- aggregation correct. environment / region / deploy_id stay non-key stored
+-- columns. The non-key columns backfill automatically (see the upgrade note and
+-- ALTERs below); only deploy_version's ORDER BY placement needs the one-time drop.
+--
+-- EXEMPLARS + MAX DURATION (v0.1.0, pre-GA, disposable data)
+-- ---------------------------------------------------------------------------
+-- max_duration_ns is a SimpleAggregateFunction(max, UInt64): the exact slowest
+-- request in the window, merged with max on collapse and across all rollup tiers.
+-- exemplars is an Array(Tuple(DateTime64(3), UInt64, UInt32, String, String,
+-- String)) = (at, duration_ns, status_code, trace_id, span_id, request_id): a
+-- bounded, best-effort sample of real requests used to pivot from a spike to an
+-- actual request. Exemplars live ONLY on this raw tier (under the 7-day TTL); the
+-- rollup tables and MVs deliberately do NOT carry them. Both are backfilled
+-- automatically via the ALTERs below (no drop needed).
+--
+-- DOWNSTREAM TIME (v0.1.0, pre-GA, disposable data)
+-- ---------------------------------------------------------------------------
+-- sum_downstream_duration_ns is a SimpleAggregateFunction(sum, UInt64): the
+-- summed time requests spent waiting on downstream calls (outbound HTTP), so the
+-- endpoint's own time can be split from time blocked on a dependency. It sums on
+-- collapse and rolls up across all tiers, and backfills automatically (no drop).
+--
+-- ERROR CLASS + NO-STATUS REASONS (v0.1.0, pre-GA, disposable data)
+-- ---------------------------------------------------------------------------
+-- error_classes is a SimpleAggregateFunction(sumMap, Map(String,UInt64)) of
+-- bounded, normalized error labels ("DB_POOL_EXHAUSTED"), so a 5xx spike can be
+-- attributed to a cause. no_status_reasons is a
+-- SimpleAggregateFunction(sumMap, Map(UInt8,UInt64)) keyed by the proto
+-- NoStatusReason enum value, telling apart timing-out vs canceling vs crashing
+-- requests. Both merge with sumMap on collapse and roll up across all tiers
+-- (unlike exemplars), and backfill automatically via the ALTERs below (no drop).
+--
+-- UPGRADE PATH — automatic column backfill
+-- ---------------------------------------------------------------------------
+-- ApplyMigrations re-runs every .sql on startup. CREATE ... IF NOT EXISTS builds
+-- the full schema on a FRESH install but will NOT alter a table that already
+-- exists, so every column added after the original schema is ALSO backfilled
+-- below with ALTER TABLE ... ADD COLUMN IF NOT EXISTS. Those run on every boot and
+-- are idempotent no-ops once the column is present, so a pre-existing instance is
+-- upgraded in place — no manual step, no data loss. The ALTERs deliberately
+-- precede the materialized views in 0002 (whose SELECT reads these columns), so an
+-- upgrade never hits an "unknown column" error while (re)creating an MV.
+--
+-- The ONE change ALTER cannot make is to a table's sort key: deploy_version was
+-- added to the ORDER BY, and the original data-loss fix widened it to include
+-- instance/method. An instance predating THOSE sort-key changes still needs a
+-- one-time drop (pre-GA, disposable data) so the tables recreate with the correct
+-- ORDER BY — but column-only upgrades no longer do:
 --
 --   DROP TABLE IF EXISTS summaries, summaries_1m, summaries_1h, summaries_1d;
 --   DROP VIEW  IF EXISTS summaries_1m_mv, summaries_1h_mv, summaries_1d_mv;
---
--- then let the next startup recreate them from the edited 0001/0002.
 
 CREATE TABLE IF NOT EXISTS summaries
 (
@@ -58,8 +106,32 @@ CREATE TABLE IF NOT EXISTS summaries
     req_bytes       SimpleAggregateFunction(sum, UInt64),
     resp_bytes      SimpleAggregateFunction(sum, UInt64),
     latency_sketch  SimpleAggregateFunction(sumMap, Map(Int32, UInt64)),
-    status_codes    SimpleAggregateFunction(sumMap, Map(UInt32, UInt64))
+    status_codes    SimpleAggregateFunction(sumMap, Map(UInt32, UInt64)),
+    deploy_version      LowCardinality(String),
+    deploy_id           LowCardinality(String),
+    environment         LowCardinality(String),
+    region              LowCardinality(String),
+    instance_start_time SimpleAggregateFunction(max, DateTime64(3)),
+    max_duration_ns     SimpleAggregateFunction(max, UInt64),
+    exemplars           Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String)),
+    error_classes       SimpleAggregateFunction(sumMap, Map(String, UInt64)),
+    no_status_reasons   SimpleAggregateFunction(sumMap, Map(UInt8, UInt64)),
+    sum_downstream_duration_ns SimpleAggregateFunction(sum, UInt64)
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMMDD(window_start)
-ORDER BY (tenant, service, route_template, status_class, method, instance, window_start);
+ORDER BY (tenant, service, route_template, status_class, method, instance, deploy_version, window_start);
+
+-- Backfill every post-original column onto a pre-existing summaries table (the
+-- CREATE above already carries them on a fresh install, so these are no-ops then).
+-- deploy_version is intentionally NOT here: it is part of the sort key, which
+-- ALTER cannot change (see the upgrade note above). Ordered before 0002's MVs.
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS deploy_id           LowCardinality(String);
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS environment         LowCardinality(String);
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS region              LowCardinality(String);
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS instance_start_time SimpleAggregateFunction(max, DateTime64(3));
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS max_duration_ns     SimpleAggregateFunction(max, UInt64);
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS exemplars           Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String));
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS error_classes       SimpleAggregateFunction(sumMap, Map(String, UInt64));
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS no_status_reasons   SimpleAggregateFunction(sumMap, Map(UInt8, UInt64));
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS sum_downstream_duration_ns SimpleAggregateFunction(sum, UInt64);

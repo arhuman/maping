@@ -13,7 +13,9 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,6 +43,33 @@ type KeyInfo struct {
 //go:embed migrations/postgres/*.sql
 var migrationsFS embed.FS
 
+// MigrationSource is a directory of ordered .sql files applied on top of the
+// embedded core schema. It is the extension seam for a composed build (e.g. an
+// enterprise module) to add its own tables/columns without editing core
+// migrations: the files must be additive and idempotent, exactly like core.
+type MigrationSource struct {
+	FS  fs.FS
+	Dir string
+}
+
+// options carries the functional-option configuration for New.
+type options struct {
+	extraMigrations []MigrationSource
+}
+
+// Option configures New.
+type Option func(*options)
+
+// WithExtraMigrations registers an additional migration source applied, in
+// lexical filename order, AFTER the embedded core migrations. Multiple sources
+// apply in registration order. This lets a composed build layer extra schema on
+// top of core without forking the core migration history.
+func WithExtraMigrations(fsys fs.FS, dir string) Option {
+	return func(o *options) {
+		o.extraMigrations = append(o.extraMigrations, MigrationSource{FS: fsys, Dir: dir})
+	}
+}
+
 // querier is the subset of pgxpool.Pool the store needs, so the resolver and
 // limits lookups can be unit-tested against a fake without a live Postgres.
 type querier interface {
@@ -53,11 +82,19 @@ type querier interface {
 // queries are parameterized.
 type Store struct {
 	pool *pgxpool.Pool
+	// now is an injectable clock retained for time-dependent control-plane
+	// operations; the limits lookup is billing-blind and no longer reads it.
+	now func() time.Time
 }
 
-// New opens a pool against dsn, verifies connectivity, and applies the embedded
-// migration idempotently. The caller owns the returned Store and must Close it.
-func New(ctx context.Context, dsn string) (*Store, error) {
+// New opens a pool against dsn, verifies connectivity, and applies the core
+// migrations idempotently, followed by any sources registered via
+// WithExtraMigrations. The caller owns the returned Store and must Close it.
+func New(ctx context.Context, dsn string, opts ...Option) (*Store, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("control.New: pool: %w", err)
@@ -66,11 +103,11 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("control.New: ping: %w", err)
 	}
-	if err := applyMigrations(ctx, pool); err != nil {
+	if err := applyMigrations(ctx, pool, o.extraMigrations); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("control.New: migrate: %w", err)
 	}
-	return &Store{pool: pool}, nil
+	return &Store{pool: pool, now: time.Now}, nil
 }
 
 // Close releases the underlying pool.
@@ -82,28 +119,48 @@ func (s *Store) Close() {
 // close the pool during shutdown.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// applyMigrations runs every embedded .sql file in lexical order. Files are
-// idempotent (CREATE ... IF NOT EXISTS, INSERT ... ON CONFLICT), so applying
-// them on every startup is safe.
-func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	entries, err := migrationsFS.ReadDir("migrations/postgres")
+// execer is the Exec subset applyMigrations needs, so migration ordering is
+// unit-testable against a recording fake without a live Postgres.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// applyMigrations runs the embedded core schema first, then each extra source in
+// registration order. Every source's files apply in lexical filename order and
+// must be idempotent (CREATE ... IF NOT EXISTS, INSERT ... ON CONFLICT), so
+// applying them on every startup is safe.
+func applyMigrations(ctx context.Context, db execer, extra []MigrationSource) error {
+	sources := make([]MigrationSource, 0, 1+len(extra))
+	sources = append(sources, MigrationSource{FS: migrationsFS, Dir: "migrations/postgres"})
+	sources = append(sources, extra...)
+	for _, src := range sources {
+		if err := applyMigrationSource(ctx, db, src); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigrationSource applies one source's .sql files in lexical order.
+func applyMigrationSource(ctx context.Context, db execer, src MigrationSource) error {
+	entries, err := fs.ReadDir(src.FS, src.Dir)
 	if err != nil {
-		return fmt.Errorf("read migrations: %w", err)
+		return fmt.Errorf("read migrations %s: %w", src.Dir, err)
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
 			names = append(names, e.Name())
 		}
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		sqlBytes, err := migrationsFS.ReadFile("migrations/postgres/" + name)
+		sqlBytes, err := fs.ReadFile(src.FS, src.Dir+"/"+name)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
+			return fmt.Errorf("read %s/%s: %w", src.Dir, name, err)
 		}
-		if _, err := pool.Exec(ctx, string(sqlBytes)); err != nil {
-			return fmt.Errorf("apply %s: %w", name, err)
+		if _, err := db.Exec(ctx, string(sqlBytes)); err != nil {
+			return fmt.Errorf("apply %s/%s: %w", src.Dir, name, err)
 		}
 	}
 	return nil
@@ -196,59 +253,92 @@ func (s *Store) RevokeKey(ctx context.Context, orgID, keyID string) error {
 }
 
 func revokeKey(ctx context.Context, q querier, orgID, keyID string) error {
-	tag, err := q.Exec(ctx,
+	return execExpectOne(ctx, q, "control.RevokeKey", ErrKeyNotFound,
 		`UPDATE ingest_keys SET revoked_at = now() WHERE id = $1 AND org_id = $2 AND revoked_at IS NULL`,
-		keyID, orgID,
-	)
+		keyID, orgID)
+}
+
+// execExpectOne runs a single-row-affecting write and maps "no row matched" to
+// notFound, wrapping a genuine database error with label. It is the shared shape of
+// the revoke-style operations (revoke key, revoke invite).
+func execExpectOne(ctx context.Context, q querier, label string, notFound error, sql string, args ...any) error {
+	tag, err := q.Exec(ctx, sql, args...)
 	if err != nil {
-		return fmt.Errorf("control.RevokeKey: %w", err)
+		return fmt.Errorf("%s: %w", label, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrKeyNotFound
+		return notFound
 	}
 	return nil
 }
 
-// ListKeys returns an org's ingest keys (active and revoked), newest first. The
-// secret is never returned — only the display last-4 and lifecycle timestamps.
-func (s *Store) ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, label, last4, created_at, revoked_at
-		   FROM ingest_keys WHERE org_id = $1 ORDER BY created_at DESC`, orgID)
+// queryList runs a parameterized list query and drains it through scan, the shared
+// shape of the list endpoints (keys, members, invites): each caller supplies only
+// its SQL, args, and per-row Scan. Errors are wrapped with label.
+func queryList[T any](ctx context.Context, q rowsQuerier, label, sql string, args []any, scan func(pgx.Rows) (T, error)) ([]T, error) {
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, fmt.Errorf("control.ListKeys: query: %w", err)
+		return nil, fmt.Errorf("%s: query: %w", label, err)
 	}
+	return collectRows(rows, label, scan)
+}
+
+// collectRows drains a result set through scan into a slice, wrapping scan/rows
+// errors with label.
+func collectRows[T any](rows pgx.Rows, label string, scan func(pgx.Rows) (T, error)) ([]T, error) {
 	defer rows.Close()
-	var out []KeyInfo
+	var out []T
 	for rows.Next() {
-		var k KeyInfo
-		if err := rows.Scan(&k.ID, &k.Label, &k.Last4, &k.CreatedAt, &k.RevokedAt); err != nil {
-			return nil, fmt.Errorf("control.ListKeys: scan: %w", err)
+		v, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: scan: %w", label, err)
 		}
-		out = append(out, k)
+		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("control.ListKeys: rows: %w", err)
+		return nil, fmt.Errorf("%s: rows: %w", label, err)
 	}
 	return out, nil
 }
 
-// Limits resolves tenant's plan limits: orgs.plan -> plan_limits row. It falls
-// back to guardrail.DefaultLimits when the org or its plan row is missing, so a
-// misconfigured plan never fails ingest open on the limit budget.
+// ListKeys returns an org's ingest keys (active and revoked), newest first. The
+// secret is never returned — only the display last-4 and lifecycle timestamps.
+//nolint:dupl // parallel list endpoint; the shared shape is already factored into queryList, only the SQL + Scan differ.
+func (s *Store) ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error) {
+	return queryList(ctx, s.pool, "control.ListKeys",
+		`SELECT id::text, label, last4, created_at, revoked_at
+		   FROM ingest_keys WHERE org_id = $1 ORDER BY created_at DESC`, []any{orgID},
+		func(r pgx.Rows) (KeyInfo, error) {
+			var k KeyInfo
+			err := r.Scan(&k.ID, &k.Label, &k.Last4, &k.CreatedAt, &k.RevokedAt)
+			return k, err
+		})
+}
+
+// Limits resolves tenant's plan-limits budget: it reads the org's plan and
+// returns the plan_limits row for that plan. It resolves only the plan budget —
+// any further per-tenant policy lives in an injectable LimitProvider a composing
+// build supplies, not here. It falls back to guardrail.DefaultLimits when the org
+// or its plan row is missing, so a misconfigured plan never fails ingest open on
+// the limit budget.
 func (s *Store) Limits(ctx context.Context, tenant string) (guardrail.Limits, error) {
 	return queryLimits(ctx, s.pool, tenant)
 }
 
-// queryLimits is the parameterized limits lookup against a querier.
+// queryLimits is the parameterized, billing-blind limits lookup against a
+// querier. It joins the org's plan to its plan_limits budget and returns exactly
+// that budget; a missing org/plan row falls back to DefaultLimits.
 func queryLimits(ctx context.Context, q querier, tenant string) (guardrail.Limits, error) {
-	var l guardrail.Limits
+	var (
+		plan string
+		l    guardrail.Limits
+	)
 	err := q.QueryRow(ctx, `
-		SELECT pl.max_rps, pl.burst, pl.cardinality_cap, pl.max_payload_bytes, pl.retention_days
+		SELECT o.plan, pl.max_rps, pl.burst, pl.cardinality_cap, pl.max_payload_bytes, pl.retention_days
 		FROM orgs o
 		JOIN plan_limits pl ON pl.plan = o.plan
 		WHERE o.id = $1`, tenant,
-	).Scan(&l.MaxRPS, &l.Burst, &l.CardinalityCap, &l.MaxPayloadBytes, &l.RetentionDays)
+	).Scan(&plan, &l.MaxRPS, &l.Burst, &l.CardinalityCap, &l.MaxPayloadBytes, &l.RetentionDays)
 	if err == pgx.ErrNoRows {
 		return guardrail.DefaultLimits(), nil
 	}

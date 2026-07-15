@@ -48,6 +48,30 @@ func (nopScopedQuery) EndpointDetail(context.Context, string, string, string, ti
 func (nopScopedQuery) InstancesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.InstanceStat, error) {
 	return nil, nil
 }
+func (nopScopedQuery) VersionsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.VersionStat, error) {
+	return nil, nil
+}
+func (nopScopedQuery) ExemplarsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.ExemplarRow, error) {
+	return nil, nil
+}
+func (nopScopedQuery) LatencyByStatusClass(context.Context, string, string, string, time.Time, time.Time) (map[string]storage.ClassLatency, error) {
+	return nil, nil
+}
+func (nopScopedQuery) ErrorClassesForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.ErrorClassStat, error) {
+	return nil, nil
+}
+func (nopScopedQuery) NoStatusReasonsForEndpoint(context.Context, string, string, string, time.Time, time.Time) ([]storage.NoStatusReasonStat, error) {
+	return nil, nil
+}
+func (nopScopedQuery) DownstreamForEndpoint(context.Context, string, string, string, time.Time, time.Time) (storage.DownstreamStat, error) {
+	return storage.DownstreamStat{}, nil
+}
+func (nopScopedQuery) InstanceResourcesForService(context.Context, string, time.Time, time.Time) ([]storage.InstanceResourceStat, error) {
+	return nil, nil
+}
+func (nopScopedQuery) PerformanceStats(context.Context, time.Time, time.Time) (storage.PerformanceStat, error) {
+	return storage.PerformanceStat{}, nil
+}
 func (nopScopedQuery) HasAnySummary(context.Context) (bool, error) { return false, nil }
 
 // fakeControlPlane is a scriptable controlPlane for the dashboard-wiring tests:

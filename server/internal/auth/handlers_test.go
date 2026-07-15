@@ -421,9 +421,144 @@ func TestLoginPageListsProvidersAndDevLogin(t *testing.T) {
 	a := newTestAuth(t, &fakeStore{})
 	rec := httptest.NewRecorder()
 	a.handleLoginPage(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-	if !strings.Contains(rec.Body.String(), "Dev login") {
+	body := rec.Body.String()
+	if !strings.Contains(body, "Dev login") {
 		t.Error("dev-login button missing from login page")
+	}
+	if strings.Contains(body, "Continue with GitHub") {
+		t.Error("no provider configured must not render a GitHub button")
+	}
+}
+
+func TestLoginPageWithProviderShowsButtonNotDevLogin(t *testing.T) {
+	a := providerAuth(t, &fakeStore{}, "http://unused") // GitHub configured -> dev-login off
+	rec := httptest.NewRecorder()
+	a.handleLoginPage(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "Continue with GitHub") {
+		t.Error("a configured GitHub provider must render its button")
+	}
+	if strings.Contains(body, "Dev login") {
+		t.Error("dev-login must be hidden when a real provider is configured")
+	}
+}
+
+func TestAuthenticatedReflectsSessionCookie(t *testing.T) {
+	a := newTestAuth(t, &fakeStore{})
+	anon := httptest.NewRequest(http.MethodGet, "/", nil)
+	if a.Authenticated(anon) {
+		t.Error("a request with no session cookie must be unauthenticated")
+	}
+	rec := httptest.NewRecorder()
+	a.setSessionCookie(rec, newSession("org-1", "mem-1", "admin"))
+	signedIn := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range rec.Result().Cookies() {
+		signedIn.AddCookie(c)
+	}
+	if !a.Authenticated(signedIn) {
+		t.Error("a request with a valid session cookie must be authenticated")
 	}
 }
 
 var _ = url.Values{}
+
+// fakeInterceptor is a scripted LoginInterceptor: it records the identity it was
+// handed, optionally starts a session through the PostAuthContext capability, and
+// reports whether it handled the response.
+type fakeInterceptor struct {
+	gotSubject string
+	gotEmail   string
+	handle     bool // when true, Handle fully owns the response and returns true
+}
+
+func (f *fakeInterceptor) Handle(pa PostAuthContext, w http.ResponseWriter, r *http.Request, subject, email string) bool {
+	f.gotSubject, f.gotEmail = subject, email
+	if !f.handle {
+		return false
+	}
+	// Prove the capability: start a session for an out-of-band-resolved member.
+	pa.SetSession(w, "hook-org", "hook-member", "member")
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return true
+}
+
+// TestCallbackDelegatesToInterceptorWhichHandles proves the seam: a wired
+// LoginInterceptor receives the verified identity plus a PostAuthContext, and when
+// it fully handles the response (returns true) the callback stops before the
+// default UpsertMemberFromOIDC path — the session it minted via pa.SetSession wins.
+func TestCallbackDelegatesToInterceptorWhichHandles(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"bearer"}`))
+	}))
+	defer tokenSrv.Close()
+
+	store := &fakeStore{}
+	hook := &fakeInterceptor{handle: true}
+	a := providerAuth(t, store, tokenSrv.URL)
+	a.postAuth = hook
+	a.userinfo = func(_ context.Context, _ providerName, _ *oauth2.Config, _ *oauth2.Token) (identity, error) {
+		return identity{Subject: "github:7", Email: "invitee@corp.io"}, nil
+	}
+
+	const state = "st"
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=c&state="+state, nil)
+	req.SetPathValue("provider", "github")
+	req.AddCookie(signedStateCookie(a, "github|"+state))
+
+	rec := httptest.NewRecorder()
+	a.handleCallback(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("interceptor callback status = %d body=%q, want 303", rec.Code, rec.Body.String())
+	}
+	if hook.gotSubject != "github:7" || hook.gotEmail != "invitee@corp.io" {
+		t.Errorf("interceptor got (%q,%q), want (github:7, invitee@corp.io)", hook.gotSubject, hook.gotEmail)
+	}
+	if store.upsertSubject != "" {
+		t.Error("a handled interceptor must NOT fall through to UpsertMemberFromOIDC")
+	}
+	if sess := sessionFromSetCookie(t, a, rec); sess.OrgID != "hook-org" {
+		t.Errorf("session org = %q, want hook-org (minted via pa.SetSession)", sess.OrgID)
+	}
+}
+
+// TestCallbackFallsThroughWhenInterceptorDeclines proves the fall-through: when the
+// wired interceptor returns false (it did not handle the request), the callback
+// runs the default first-login path (UpsertMemberFromOIDC + session).
+func TestCallbackFallsThroughWhenInterceptorDeclines(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"bearer"}`))
+	}))
+	defer tokenSrv.Close()
+
+	store := &fakeStore{}
+	hook := &fakeInterceptor{handle: false}
+	a := providerAuth(t, store, tokenSrv.URL)
+	a.postAuth = hook
+	a.userinfo = func(_ context.Context, _ providerName, _ *oauth2.Config, _ *oauth2.Token) (identity, error) {
+		return identity{Subject: "github:9", Email: "solo@corp.io"}, nil
+	}
+
+	const state = "st"
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=c&state="+state, nil)
+	req.SetPathValue("provider", "github")
+	req.AddCookie(signedStateCookie(a, "github|"+state))
+
+	rec := httptest.NewRecorder()
+	a.handleCallback(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("fall-through status = %d body=%q, want 303", rec.Code, rec.Body.String())
+	}
+	if hook.gotSubject != "github:9" {
+		t.Errorf("interceptor must still be consulted; gotSubject = %q", hook.gotSubject)
+	}
+	if store.upsertSubject != "github:9" {
+		t.Errorf("a declining interceptor must fall through to upsert; upsertSubject = %q", store.upsertSubject)
+	}
+	if sess := sessionFromSetCookie(t, a, rec); sess.OrgID != "org-from-oidc" {
+		t.Errorf("session org = %q, want org-from-oidc (default first-login)", sess.OrgID)
+	}
+}

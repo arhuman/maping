@@ -40,6 +40,13 @@ func NewRateLimiter(provider LimitProvider) *RateLimiter {
 // Allow reports whether a request for tenant may proceed, consuming a token.
 // The tenant's rps/burst come from the provider (falling back to defaults), and
 // the per-tenant limiter is created lazily on first use.
+//
+// A cached limiter is re-tuned to the currently resolved budget on every call, so
+// a plan change (upgrade/downgrade) or a subscription-lifecycle suspension takes
+// effect immediately without a process restart. In particular a suspended tenant
+// resolves to MaxRPS:0/Burst:0, which SetLimit/SetBurst turn into a hard deny —
+// the enforcement lever the control plane relies on. SetLimit/SetBurst preserve
+// the bucket's accumulated tokens, so re-tuning to an unchanged budget is a no-op.
 func (r *RateLimiter) Allow(ctx context.Context, tenant string) bool {
 	limits := DefaultLimits()
 	if r.provider != nil {
@@ -47,12 +54,20 @@ func (r *RateLimiter) Allow(ctx context.Context, tenant string) bool {
 			limits = l
 		}
 	}
+	rps := rate.Limit(limits.MaxRPS)
 
 	r.mu.Lock()
 	lim, ok := r.limiters[tenant]
 	if !ok {
-		lim = rate.NewLimiter(rate.Limit(limits.MaxRPS), limits.Burst)
+		lim = rate.NewLimiter(rps, limits.Burst)
 		r.limiters[tenant] = lim
+	} else {
+		if lim.Limit() != rps {
+			lim.SetLimit(rps)
+		}
+		if lim.Burst() != limits.Burst {
+			lim.SetBurst(limits.Burst)
+		}
 	}
 	r.mu.Unlock()
 

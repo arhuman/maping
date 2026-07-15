@@ -41,6 +41,25 @@ type MemberStore interface {
 	IssueKey(ctx context.Context, orgID, label string) (secret string, err error)
 }
 
+// PostAuthContext is the capability surface a LoginInterceptor uses to complete
+// a post-authentication flow — today, starting a dashboard session for a member
+// it resolved out of band (e.g. by accepting an invite). It keeps the session
+// signer private to auth while letting a composed feature finish the login.
+type PostAuthContext interface {
+	// SetSession signs and writes the dashboard session cookie for a resolved
+	// member, exactly as the core first-login path does.
+	SetSession(w http.ResponseWriter, orgID, memberID, role string)
+}
+
+// LoginInterceptor is an optional post-authentication hook the OIDC callback
+// consults after the identity is verified, before the default first-login flow.
+// Handle returns true when it fully handled the response (the callback then
+// returns); false falls through to UpsertMemberFromOIDC. pa lets it start a
+// session. A nil interceptor means plain login only.
+type LoginInterceptor interface {
+	Handle(pa PostAuthContext, w http.ResponseWriter, r *http.Request, oidcSubject, email string) (handled bool)
+}
+
 // Config bundles the auth layer's dependencies and startup options. main builds
 // it from the environment.
 type Config struct {
@@ -60,6 +79,9 @@ type Config struct {
 	HTTPClient *http.Client
 	// Logger is the structured logger (defaults to slog.Default()).
 	Logger *slog.Logger
+	// Interceptor is the composed post-auth hook the callback consults after the
+	// identity is verified (nil = plain login).
+	Interceptor LoginInterceptor
 }
 
 // Auth is the mAPI-ng dashboard auth layer. It mounts open login routes, verifies
@@ -76,6 +98,9 @@ type Auth struct {
 	client     *http.Client
 	userinfo   userinfoFunc
 	log        *slog.Logger
+	// postAuth is the optional post-authentication hook (nil = plain login). The
+	// callback delegates to it so it carries no invite-specific logic itself.
+	postAuth LoginInterceptor
 }
 
 // New builds the auth layer. Dev-login is enabled ONLY when no real provider is
@@ -107,6 +132,9 @@ func New(cfg Config) (*Auth, error) {
 		userinfo:   httpUserinfo(client),
 		log:        log,
 	}
+	// The post-auth hook is composed in (nil = plain login). A build that wires an
+	// invitation feature supplies its interceptor here; the core carries none.
+	a.postAuth = cfg.Interceptor
 	return a, nil
 }
 
@@ -127,6 +155,13 @@ func randomToken(n int) string {
 		panic(fmt.Sprintf("auth: crypto/rand: %v", err))
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// SetSession signs and writes the dashboard session cookie for a resolved
+// member, implementing PostAuthContext so a composed LoginInterceptor can start
+// a session through the same path the core first-login uses.
+func (a *Auth) SetSession(w http.ResponseWriter, orgID, memberID, role string) {
+	a.setSessionCookie(w, newSession(orgID, memberID, role))
 }
 
 // setSessionCookie signs sess and writes it as the session cookie.
@@ -176,48 +211,62 @@ func providerFromPath(v string) providerName {
 	return providerName(strings.ToLower(v))
 }
 
-// setStateCookie stores the OAuth CSRF state in a short-lived signed HttpOnly
-// cookie. The value is signed with the session key (reusing the signer's MAC
-// via an ephemeral Session-shaped payload would be awkward, so it signs the raw
-// payload directly) so a client cannot forge or tamper with the stored state.
-func (a *Auth) setStateCookie(w http.ResponseWriter, payload string) {
+// writeSignedCookie sets a short-lived signed HttpOnly cookie carrying payload.
+// The value is base64(payload).base64(hmac) under the session key, so a client
+// cannot forge or tamper with it. The OAuth state cookie is minted through here.
+func (a *Auth) writeSignedCookie(w http.ResponseWriter, name, payload string, maxAge time.Duration) {
 	p := []byte(payload)
 	signed := base64.RawURLEncoding.EncodeToString(p) + "." +
 		base64.RawURLEncoding.EncodeToString(a.signer.mac(p))
 	http.SetCookie(w, &http.Cookie{
-		Name:     stateCookie,
+		Name:     name,
 		Value:    signed,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   a.secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(stateMaxAge / time.Second),
+		MaxAge:   int(maxAge / time.Second),
 	})
+}
+
+// readSignedCookie verifies and returns the payload of a signed cookie. ok=false
+// when the cookie is absent, malformed, or its MAC does not verify.
+func (a *Auth) readSignedCookie(r *http.Request, name string) (payload string, ok bool) {
+	c, err := r.Cookie(name)
+	if err != nil {
+		return "", false
+	}
+	dot := strings.IndexByte(c.Value, '.')
+	if dot < 0 {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(c.Value[:dot])
+	if err != nil {
+		return "", false
+	}
+	gotMAC, err := base64.RawURLEncoding.DecodeString(c.Value[dot+1:])
+	if err != nil {
+		return "", false
+	}
+	if !hmac.Equal(gotMAC, a.signer.mac(raw)) {
+		return "", false
+	}
+	return string(raw), true
+}
+
+// setStateCookie stores the OAuth CSRF state (provider|state) in a signed cookie.
+func (a *Auth) setStateCookie(w http.ResponseWriter, payload string) {
+	a.writeSignedCookie(w, stateCookie, payload, stateMaxAge)
 }
 
 // readStateCookie verifies and splits the state cookie into (provider, state).
 // ok=false when the cookie is absent, malformed, or its MAC does not verify.
 func (a *Auth) readStateCookie(r *http.Request) (provider, state string, ok bool) {
-	c, err := r.Cookie(stateCookie)
-	if err != nil {
+	payload, ok := a.readSignedCookie(r, stateCookie)
+	if !ok {
 		return "", "", false
 	}
-	dot := strings.IndexByte(c.Value, '.')
-	if dot < 0 {
-		return "", "", false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(c.Value[:dot])
-	if err != nil {
-		return "", "", false
-	}
-	gotMAC, err := base64.RawURLEncoding.DecodeString(c.Value[dot+1:])
-	if err != nil {
-		return "", "", false
-	}
-	if !hmac.Equal(gotMAC, a.signer.mac(payload)) {
-		return "", "", false
-	}
-	parts := strings.SplitN(string(payload), "|", 2)
+	parts := strings.SplitN(payload, "|", 2)
 	if len(parts) != 2 {
 		return "", "", false
 	}

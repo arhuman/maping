@@ -118,6 +118,63 @@ func TestUploadStoresInBandSummaries(t *testing.T) {
 	assert.Equal(t, "checkout-api", sink.rows[0].Service)
 }
 
+// fakeInstanceWindowSink records enqueued USE-gauge rows.
+type fakeInstanceWindowSink struct {
+	rows []storage.InstanceWindowRow
+}
+
+func (f *fakeInstanceWindowSink) EnqueueInstanceWindow(row storage.InstanceWindowRow) error {
+	f.rows = append(f.rows, row)
+	return nil
+}
+
+func TestUploadStoresInstanceWindows(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	iwSink := &fakeInstanceWindowSink{}
+	resolver := NewStaticKeyResolver(map[string]string{"dev-key": "dev-tenant"})
+	h := NewHandler(resolver, &fakeSink{}, nil, WithInstanceWindowSink(iwSink))
+	h.now = func() time.Time { return now }
+
+	msg := &mapingv1.UploadRequest{
+		Envelope: &mapingv1.Envelope{Service: "checkout-api", Instance: "pod-1"},
+		InstanceWindows: []*mapingv1.InstanceWindow{
+			{
+				WindowStartMs:  now.Add(-10 * time.Second).UnixMilli(),
+				WindowEndMs:    now.UnixMilli(),
+				HeapAllocBytes: 4096,
+				Goroutines:     50,
+			},
+			{ // out-of-band: dropped, not stored.
+				WindowStartMs: now.Add(-2 * time.Hour).UnixMilli(),
+				WindowEndMs:   now.Add(-time.Hour).UnixMilli(),
+			},
+		},
+	}
+	resp, err := h.Upload(context.Background(), withBearer(msg, "dev-key"))
+	require.NoError(t, err)
+	assert.True(t, resp.Msg.GetAccepted())
+	require.Len(t, iwSink.rows, 1, "the in-band window is stored, the stale one dropped")
+	assert.Equal(t, "dev-tenant", iwSink.rows[0].Tenant.String())
+	assert.Equal(t, "pod-1", iwSink.rows[0].Instance)
+	assert.Equal(t, uint64(50), iwSink.rows[0].Goroutines)
+}
+
+func TestUploadIgnoresInstanceWindowsWithoutSink(t *testing.T) {
+	// The zero-option handler has no instance-window sink, so windows are silently
+	// ignored and the upload still succeeds.
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	h := newTestHandler(t, &fakeSink{}, now)
+	msg := &mapingv1.UploadRequest{
+		Envelope: &mapingv1.Envelope{Service: "svc", Instance: "i"},
+		InstanceWindows: []*mapingv1.InstanceWindow{
+			{WindowStartMs: now.Add(-time.Second).UnixMilli(), WindowEndMs: now.UnixMilli()},
+		},
+	}
+	resp, err := h.Upload(context.Background(), withBearer(msg, "dev-key"))
+	require.NoError(t, err)
+	assert.True(t, resp.Msg.GetAccepted())
+}
+
 func TestUploadDropsOutOfBandSummaries(t *testing.T) {
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
 	sink := &fakeSink{}

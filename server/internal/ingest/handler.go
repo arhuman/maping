@@ -26,6 +26,15 @@ type RowSink interface {
 	Enqueue(row storage.Row) error
 }
 
+// InstanceWindowSink is the optional write side for per-instance USE gauges. It
+// is separate from RowSink (a different table) and wired only when a sink is
+// provided (WithInstanceWindowSink), so the zero-option handler and existing
+// tests ignore instance windows entirely. The storage.Writer satisfies it via
+// EnqueueInstanceWindow.
+type InstanceWindowSink interface {
+	EnqueueInstanceWindow(row storage.InstanceWindowRow) error
+}
+
 // Auth header conventions. The ingest key arrives either as a bearer token or
 // in the mAPI-ng-specific header.
 const (
@@ -102,6 +111,8 @@ type Handler struct {
 	payloadLimit payloadLimitFunc
 
 	handshakes HandshakeRecorder
+
+	iwSink InstanceWindowSink
 }
 
 var _ mapingv1connect.IngestServiceHandler = (*Handler)(nil)
@@ -156,6 +167,17 @@ func WithHandshakeRecorder(r HandshakeRecorder) Option {
 	return func(h *Handler) {
 		if r != nil {
 			h.handshakes = r
+		}
+	}
+}
+
+// WithInstanceWindowSink enables ingestion of per-instance USE gauges through
+// sink (typically the storage.Writer). A nil sink is ignored, keeping instance
+// windows off by default so existing wiring and tests are unaffected.
+func WithInstanceWindowSink(sink InstanceWindowSink) Option {
+	return func(h *Handler) {
+		if sink != nil {
+			h.iwSink = sink
 		}
 	}
 }
@@ -265,23 +287,28 @@ func (h *Handler) Upload(
 		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("rate limit exceeded"))
 	}
 
-	// Per-tenant logical payload enforcement. The fixed HTTP-layer
-	// body cap is a pre-auth memory-safety ceiling; the plan's MaxPayloadBytes is
-	// the fairness bound, enforceable only here because the tenant is now known.
-	// Guardrails fail closed with a reason the client can log: reject the whole
-	// request rather than silently truncate. A cap <= 0 disables the check.
-	if h.payloadLimit != nil {
-		if limit := h.payloadLimit(ctx, tid.String()); limit > 0 {
-			if size := int64(proto.Size(req.Msg)); size > limit {
-				return nil, connect.NewError(connect.CodeResourceExhausted,
-					errors.New("payload exceeds per-tenant max_payload_bytes"))
-			}
-		}
+	// Per-tenant logical payload enforcement. The fixed HTTP-layer body cap is a
+	// pre-auth memory-safety ceiling; the plan's MaxPayloadBytes is the fairness
+	// bound, enforceable only here because the tenant is now known. Fail closed
+	// with a reason the client can log: reject the whole request, never truncate.
+	if !h.payloadWithinLimit(ctx, tid, req.Msg) {
+		return nil, connect.NewError(connect.CodeResourceExhausted,
+			errors.New("payload exceeds per-tenant max_payload_bytes"))
 	}
 
 	env := req.Msg.GetEnvelope()
 	service := env.GetService()
 	instance := env.GetInstance()
+	// Deploy identity travels on the Envelope and applies to every summary in the
+	// batch. It is stored as a low-cardinality dimension, not part of any series
+	// or cardinality key.
+	deploy := deployIdentity{
+		version:     env.GetDeployVersion(),
+		id:          env.GetDeployId(),
+		environment: env.GetEnvironment(),
+		region:      env.GetRegion(),
+		start:       instanceStartTime(env.GetInstanceStartTimeMs()),
+	}
 	now := h.now()
 
 	// Resolve the tenant's cardinality cap once per request; the guard is
@@ -291,12 +318,12 @@ func (h *Handler) Upload(
 		cardCap = h.cap(ctx, tid.String())
 	}
 
-	var rejected uint64
-	for _, s := range req.Msg.GetSummaries() {
-		if !h.storeSummary(tid, service, instance, s, now, cardCap) {
-			rejected++
-		}
-	}
+	rejected := h.storeSummaries(tid, service, instance, deploy, req.Msg.GetSummaries(), now, cardCap)
+
+	// Per-instance USE gauges ride along on the same upload but land in a separate
+	// table (best-effort; a closed/backpressured USE stream must never fail the RED
+	// upload).
+	h.storeInstanceWindows(tid, service, instance, req.Msg.GetInstanceWindows(), now)
 
 	return connect.NewResponse(&mapingv1.UploadResponse{
 		Accepted:          true,
@@ -304,12 +331,32 @@ func (h *Handler) Upload(
 	}), nil
 }
 
+// deployIdentity is the per-batch deploy dimension carried on the Envelope. It
+// applies to every summary in the batch and is stored as a low-cardinality
+// dimension — deliberately NOT part of the series or cardinality key.
+type deployIdentity struct {
+	version     string
+	id          string
+	environment string
+	region      string
+	start       time.Time
+}
+
+// instanceStartTime converts the Envelope's instance_start_time_ms into a UTC
+// time, mapping the proto3 zero (unset) to the zero time rather than the epoch.
+func instanceStartTime(ms int64) time.Time {
+	if ms == 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms).UTC()
+}
+
 // storeSummary validates one summary against the timestamp and cardinality
 // guards, converts it to a row, and enqueues it. It returns false when the
 // summary is dropped for any reason — out-of-band skew, a frozen new series, a
 // conversion error, or a backpressured/closed data plane — so Upload can simply
 // count rejections without unwinding the guard sequence inline.
-func (h *Handler) storeSummary(tid tenant.ID, service, instance string, s *mapingv1.Summary, now time.Time, cardCap int) bool {
+func (h *Handler) storeSummary(tid tenant.ID, service, instance string, deploy deployIdentity, s *mapingv1.Summary, now time.Time, cardCap int) bool {
 	decision := applyTimestampPolicy(s.GetWindowStartMs(), s.GetWindowEndMs(), now)
 	if !decision.accepted {
 		return false
@@ -322,11 +369,58 @@ func (h *Handler) storeSummary(tid tenant.ID, service, instance string, s *mapin
 			return false
 		}
 	}
-	row, err := summaryToRow(tid, service, instance, s, decision.start, decision.end)
+	row, err := summaryToRow(tid, service, instance,
+		deploy.version, deploy.id, deploy.environment, deploy.region, deploy.start,
+		s, decision.start, decision.end)
 	if err != nil {
 		return false
 	}
 	// Enqueue failure means the data plane refused (closed/backpressured): count
 	// as rejected so the client sees the drop rather than a whole-batch failure.
 	return h.sink.Enqueue(row) == nil
+}
+
+// payloadWithinLimit reports whether req fits the tenant's plan payload cap. A
+// nil provider or a cap <= 0 disables the check (returns true); otherwise the
+// decoded proto size must not exceed the cap.
+func (h *Handler) payloadWithinLimit(ctx context.Context, tid tenant.ID, req *mapingv1.UploadRequest) bool {
+	if h.payloadLimit == nil {
+		return true
+	}
+	limit := h.payloadLimit(ctx, tid.String())
+	if limit <= 0 {
+		return true
+	}
+	return int64(proto.Size(req)) <= limit
+}
+
+// storeSummaries stores each summary in the batch and returns how many were
+// rejected (out-of-band skew, a frozen new series, a conversion error, or a
+// backpressured/closed data plane — see storeSummary).
+func (h *Handler) storeSummaries(tid tenant.ID, service, instance string, deploy deployIdentity, summaries []*mapingv1.Summary, now time.Time, cardCap int) uint64 {
+	var rejected uint64
+	for _, s := range summaries {
+		if !h.storeSummary(tid, service, instance, deploy, s, now, cardCap) {
+			rejected++
+		}
+	}
+	return rejected
+}
+
+// storeInstanceWindows drains the batch's per-instance USE gauges into the
+// instance_windows stream. Best-effort: a closed/backpressured USE stream must
+// never fail the RED upload, so the first enqueue error just stops the drain.
+func (h *Handler) storeInstanceWindows(tid tenant.ID, service, instance string, windows []*mapingv1.InstanceWindow, now time.Time) {
+	if h.iwSink == nil {
+		return
+	}
+	for _, iw := range windows {
+		row, ok := instanceWindowToRow(tid, service, instance, iw, now)
+		if !ok {
+			continue
+		}
+		if err := h.iwSink.EnqueueInstanceWindow(row); err != nil {
+			return
+		}
+	}
 }

@@ -214,18 +214,9 @@ func Services(
 	}
 	defer rows.Close()
 
-	var out []ServiceStat
-	for rows.Next() {
-		var s ServiceStat
-		if err := rows.Scan(&s.Service, &s.Count, &s.ErrorRate, &s.P50, &s.P95, &s.P99); err != nil {
-			return nil, fmt.Errorf("storage.Services: scan: %w", err)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("storage.Services: rows: %w", err)
-	}
-	return out, nil
+	return scanRows(rows, "Services", func(s *ServiceStat) []any {
+		return []any{&s.Service, &s.Count, &s.ErrorRate, &s.P50, &s.P95, &s.P99}
+	})
 }
 
 // Endpoints returns one aggregate EndpointStat per (method, route_template) of
@@ -247,18 +238,9 @@ func Endpoints(
 	}
 	defer rows.Close()
 
-	var out []EndpointStat
-	for rows.Next() {
-		var e EndpointStat
-		if err := rows.Scan(&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.P50, &e.P95, &e.P99, &e.ReqBytesAvg, &e.RespBytesAvg); err != nil {
-			return nil, fmt.Errorf("storage.Endpoints: scan: %w", err)
-		}
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("storage.Endpoints: rows: %w", err)
-	}
-	return out, nil
+	return scanRows(rows, "Endpoints", func(e *EndpointStat) []any {
+		return []any{&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.P50, &e.P95, &e.P99, &e.ReqBytesAvg, &e.RespBytesAvg}
+	})
 }
 
 // QueryEndpointDetail returns the full aggregate for one endpoint over

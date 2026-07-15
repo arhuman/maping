@@ -42,3 +42,40 @@ func TestSplitStatementsCommentWithSemicolon(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "CREATE TABLE t (a String)", got[0])
 }
+
+// TestMaterializedViewProjectionsMatchModifyQuery guards the deliberate SQL
+// duplication in 0002: each rollup MV's projection is written twice — once in
+// CREATE MATERIALIZED VIEW IF NOT EXISTS (builds a fresh install) and once in
+// ALTER TABLE ..._mv MODIFY QUERY (updates a pre-existing MV in place). The two
+// copies MUST stay byte-identical, or a fresh install and an upgraded instance
+// would roll up differently. This test fails the moment they drift.
+func TestMaterializedViewProjectionsMatchModifyQuery(t *testing.T) {
+	sqlBytes, err := migrationsFS.ReadFile("migrations/clickhouse/0002_rollups.sql")
+	require.NoError(t, err)
+	stmts := splitStatements(string(sqlBytes))
+
+	// selectBody normalizes whitespace and returns the statement from its SELECT on,
+	// so the CREATE header (CREATE ... TO ... AS) and the ALTER header (ALTER ...
+	// MODIFY QUERY) drop away and only the projection is compared.
+	selectBody := func(s string) string {
+		i := strings.Index(s, "SELECT")
+		require.GreaterOrEqual(t, i, 0)
+		return strings.Join(strings.Fields(s[i:]), " ")
+	}
+
+	for _, mv := range []string{"summaries_1m_mv", "summaries_1h_mv", "summaries_1d_mv"} {
+		var createSel, modifySel string
+		for _, s := range stmts {
+			switch {
+			case strings.Contains(s, "CREATE MATERIALIZED VIEW IF NOT EXISTS "+mv+" "):
+				createSel = selectBody(s)
+			case strings.Contains(s, "ALTER TABLE "+mv+" MODIFY QUERY"):
+				modifySel = selectBody(s)
+			}
+		}
+		require.NotEmpty(t, createSel, "missing CREATE for %s", mv)
+		require.NotEmpty(t, modifySel, "missing MODIFY QUERY for %s", mv)
+		assert.Equal(t, createSel, modifySel,
+			"%s: CREATE and MODIFY QUERY projections must be byte-identical", mv)
+	}
+}

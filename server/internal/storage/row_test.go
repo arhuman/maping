@@ -17,6 +17,10 @@ func TestNewRowSortsSketchKeys(t *testing.T) {
 		time.Unix(1, 0), time.Unix(2, 0),
 		10, 0, 0, 0,
 		sketch, nil,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		0,
 	)
 
 	require.Len(t, row.Sketch, 4)
@@ -40,6 +44,10 @@ func TestNewRowSortsStatusCodes(t *testing.T) {
 		time.Unix(1, 0), time.Unix(2, 0),
 		13, 0, 0, 0,
 		nil, codes,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		0,
 	)
 
 	require.Len(t, row.StatusCodes, 3)
@@ -56,6 +64,10 @@ func TestRowMapRoundTrip(t *testing.T) {
 		time.Unix(1, 0), time.Unix(2, 0),
 		3, 0, 0, 0,
 		sketch, codes,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		0,
 	)
 	assert.Equal(t, sketch, row.sketchMap())
 	assert.Equal(t, codes, row.statusCodeMap())
@@ -67,6 +79,10 @@ func TestNewRowEmptyMaps(t *testing.T) {
 		time.Unix(1, 0), time.Unix(2, 0),
 		0, 0, 0, 0,
 		nil, nil,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		0,
 	)
 	assert.Empty(t, row.Sketch)
 	assert.Empty(t, row.StatusCodes)

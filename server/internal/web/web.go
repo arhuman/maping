@@ -22,7 +22,6 @@
 package web
 
 import (
-	"context"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -33,83 +32,6 @@ import (
 	"github.com/arhuman/maping/server/internal/tenant"
 )
 
-// window is the fixed dashboard lookback. The 3-level view is a live RED pane,
-// not a range picker (CONTEXT: fixed, non-configurable dashboard), so a single
-// window keeps the UI simple and the tier selection deterministic.
-const window = time.Hour
-
-// seriesStep is the time-series bucket width for the detail chart.
-const seriesStep = time.Minute
-
-// Querier is the read side the web layer depends on. It exposes no un-scoped
-// query: the only way to reach the data plane is Tenant(tenant), which returns a
-// tenant-bound ScopedQuery. This makes a cross-tenant read unrepresentable —
-// isolation is a type property, not caller discipline. storage.TenantQuery
-// structurally satisfies ScopedQuery; a fake satisfies Querier in tests, so the
-// web layer never imports a live ClickHouse connection.
-type Querier interface {
-	Tenant(id tenant.ID) ScopedQuery
-}
-
-// ScopedQuery is the tenant-bound aggregate surface the dashboard reads. Every
-// method is already scoped to the tenant the handle was created for, so no
-// call site passes a tenant string.
-type ScopedQuery interface {
-	SeriesOverTime(ctx context.Context, service, method, route string, from, to time.Time, step time.Duration) ([]storage.TimePoint, error)
-	Services(ctx context.Context, from, to time.Time) ([]storage.ServiceStat, error)
-	Endpoints(ctx context.Context, service string, from, to time.Time) ([]storage.EndpointStat, error)
-	EndpointDetail(ctx context.Context, service, method, route string, from, to time.Time) (storage.EndpointDetail, error)
-	InstancesForEndpoint(ctx context.Context, service, method, route string, from, to time.Time) ([]storage.InstanceStat, error)
-	HasAnySummary(ctx context.Context) (bool, error)
-}
-
-// TenantResolver resolves the active tenant for a request. Part 1 supplies a
-// constant-tenant func; Part 2 (auth) supplies the authenticated org. ok=false
-// means no tenant could be resolved (unauthenticated), which the handlers turn
-// into a 401 — but Part 1's constant func always returns ok=true.
-type TenantResolver func(r *http.Request) (id tenant.ID, ok bool)
-
-// ServiceOnboarding mirrors control.ServiceOnboarding without importing control
-// (web sits downstream of the control plane and must not depend on it). main
-// adapts the control type into this at wiring time.
-type ServiceOnboarding struct {
-	Service     string
-	Instance    string
-	HandshakeAt time.Time
-}
-
-// OnboardingSource returns the connected services for a tenant, driving the
-// onboarding panel. Nil-safe: when unset (no control plane), the panel shows the
-// key-valid step and nothing beyond it rather than inventing data.
-type OnboardingSource func(ctx context.Context, tenant string) ([]ServiceOnboarding, error)
-
-// FrozenFunc reports whether a tenant's cardinality is frozen on this node, so
-// the onboarding/dashboard can surface the guardrail warning loudly (CONTEXT
-// Guardrails). Nil-safe: unset means "no frozen signal available", not "false".
-type FrozenFunc func(tenant string) bool
-
-// KeyInfo is a listed ingest key for the Setup keys panel. It mirrors
-// control.KeyInfo so the web layer never imports the control plane; main adapts
-// between the two. It never carries the secret — only the display last-4 and
-// lifecycle timestamps.
-type KeyInfo struct {
-	ID        string
-	Label     string
-	Last4     string
-	CreatedAt time.Time
-	RevokedAt *time.Time // nil while the key is active
-}
-
-// KeyAdmin is the self-serve key surface the Setup page drives: issue (returns
-// the full one-time token, origin already wrapped by main), list, and revoke.
-// Nil-safe: when unset (dev/no-control-plane) the keys panel is hidden and the
-// key POST routes 404, so the dashboard still renders without a control plane.
-type KeyAdmin interface {
-	IssueKey(ctx context.Context, orgID, label string) (token string, err error)
-	ListKeys(ctx context.Context, orgID string) ([]KeyInfo, error)
-	RevokeKey(ctx context.Context, orgID, keyID string) error
-}
-
 // Handler serves the 3-level dashboard, the onboarding panel, and the JSON data
 // endpoints. Every dependency beyond the querier is injected and nil-safe.
 type Handler struct {
@@ -118,7 +40,9 @@ type Handler struct {
 	onboarding OnboardingSource // may be nil (no control plane).
 	frozen     FrozenFunc       // may be nil (no guardrail signal).
 	keys       KeyAdmin         // may be nil (no control plane): hides the keys panel.
-	csrf       *csrf            // nil when keys is nil; guards the key POSTs.
+	members    MemberAdmin      // may be nil (no control plane): hides the team panel.
+	roleOf     RoleResolver     // may be nil: per-request role for admin-gating team actions.
+	csrf       *csrf            // nil when keys/members are nil; guards the Setup POSTs.
 	org        string           // sidebar identity chrome (display only).
 	user       string
 	role       string
@@ -136,8 +60,14 @@ type Config struct {
 	// KeyAdmin drives the self-serve Setup keys panel. Nil (dev/no-control-plane)
 	// hides the panel and 404s the key POSTs.
 	KeyAdmin KeyAdmin
+	// MemberAdmin drives the self-serve Setup team panel (members + invites). Nil
+	// (dev/no-control-plane) hides the panel and 404s its POSTs.
+	MemberAdmin MemberAdmin
+	// Role resolves the caller's role per request, so the team panel can admin-gate
+	// its create/revoke/remove actions. Nil is treated as "not an admin".
+	Role RoleResolver
 	// CSRFKey signs the Setup form CSRF tokens (HMAC). Required (>= 1 byte) when
-	// KeyAdmin is set; ignored otherwise. main passes the session-signing key.
+	// KeyAdmin or MemberAdmin is set; ignored otherwise. main passes the session key.
 	CSRFKey []byte
 	Logger  *slog.Logger
 	// Sidebar identity chrome (display only). Empty values fall back to
@@ -157,8 +87,8 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Tenant == nil {
 		return nil, fmt.Errorf("web.NewHandler: nil Tenant resolver")
 	}
-	if cfg.KeyAdmin != nil && len(cfg.CSRFKey) == 0 {
-		return nil, fmt.Errorf("web.NewHandler: KeyAdmin set without a CSRFKey")
+	if (cfg.KeyAdmin != nil || cfg.MemberAdmin != nil) && len(cfg.CSRFKey) == 0 {
+		return nil, fmt.Errorf("web.NewHandler: KeyAdmin/MemberAdmin set without a CSRFKey")
 	}
 	log := cfg.Logger
 	if log == nil {
@@ -174,6 +104,8 @@ func NewHandler(cfg Config) (*Handler, error) {
 		onboarding: cfg.Onboarding,
 		frozen:     cfg.Frozen,
 		keys:       cfg.KeyAdmin,
+		members:    cfg.MemberAdmin,
+		roleOf:     cfg.Role,
 		csrf:       newCSRF(cfg.CSRFKey),
 		org:        orDefault(cfg.OrgName, "mAPI-ng"),
 		user:       orDefault(cfg.UserName, "dev"),
@@ -200,6 +132,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup", h.serveSetup)
 	mux.HandleFunc("POST /setup/keys", h.serveCreateKey)
 	mux.HandleFunc("POST /setup/keys/{id}/revoke", h.serveRevokeKey)
+	mux.HandleFunc("POST /setup/invites", h.serveCreateInvite)
+	mux.HandleFunc("POST /setup/invites/{id}/revoke", h.serveRevokeInvite)
+	mux.HandleFunc("POST /setup/members/{id}/remove", h.serveRemoveMember)
 	mux.HandleFunc("GET /services/{service}", h.serveEndpoints)
 	mux.HandleFunc("GET /services/{service}/endpoint", h.serveEndpointDetail)
 
@@ -217,26 +152,69 @@ func (h *Handler) buildShell(r *http.Request, activeNav string, crumbs []crumb, 
 		Org:          h.org,
 		User:         h.user,
 		Role:         h.role,
-		Nav:          buildNav(activeNav),
+		Nav:          buildNav(activeNav, winKey),
 		Crumbs:       crumbs,
 		PageTitle:    title,
 		ShowControls: showControls,
 		Windows:      buildWindows(r, winKey),
 		WindowKey:    winKey,
 		FlushLabel:   "flush 10s",
+		KeyMask:      h.activeKeyMask(r),
 	}
 }
 
-// servePerformance renders the static performance/architecture page. It carries
-// no live data — the figures are the platform's design characteristics.
+// activeKeyMask returns the masked last-4 ("····<last4>") of the tenant's newest
+// active ingest key for the sidebar, or "" when there is no control plane, the
+// tenant does not resolve, the lookup fails, or no active key exists. It never
+// 401s or errors — the sidebar is chrome, so any miss degrades to an empty mask
+// (a muted "no active key") rather than blocking the page. ListKeys returns keys
+// newest-first, so the first non-revoked entry is the current one.
+func (h *Handler) activeKeyMask(r *http.Request) string {
+	if h.keys == nil {
+		return ""
+	}
+	tid, ok := h.tenant(r)
+	if !ok {
+		return ""
+	}
+	infos, err := h.keys.ListKeys(r.Context(), tid.String())
+	if err != nil {
+		h.log.Error("web: sidebar key lookup", slog.Any("err", err))
+		return ""
+	}
+	for _, k := range infos {
+		if k.RevokedAt == nil {
+			return "····" + k.Last4
+		}
+	}
+	return ""
+}
+
+// servePerformance renders the performance/architecture page. The volume and
+// compression figures are computed from the tenant's real stored summaries over
+// the selected window (the shared top-bar switcher, shown here too), so the page
+// honours the same lookback as the rest of the dashboard; a query failure logs
+// and renders the waiting-for-data state rather than 500-ing. The rollup-tier
+// retention and ingestion-path diagram are static architecture facts.
 func (h *Handler) servePerformance(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.resolveTenant(w, r); !ok {
+	tid, ok := h.resolveTenant(w, r)
+	if !ok {
 		return
 	}
 	winKey := normalizeWindow(r.URL.Query().Get("win"))
-	h.render(w, "performance", performancePage{
-		Shell: h.buildShell(r, "performance", []crumb{{Label: "performance"}}, "Performance", false, winKey),
-	})
+	dur := windowDur[winKey]
+	shell := h.buildShell(r, "performance", []crumb{{Label: "performance"}}, "Performance", true, winKey)
+
+	from, to := windowRange(dur)
+	start := time.Now()
+	stat, err := h.q.Tenant(tid).PerformanceStats(r.Context(), from, to)
+	queryDur := time.Since(start)
+	if err != nil {
+		h.log.Error("web: performance stats", slog.Any("err", err))
+		stat = storage.PerformanceStat{}
+	}
+
+	h.render(w, "performance", buildPerformance(shell, stat, dur, queryDur, winKey))
 }
 
 // resolveTenant resolves the active tenant or writes a 401. It centralizes the
@@ -290,7 +268,7 @@ func (h *Handler) serveOverview(w http.ResponseWriter, r *http.Request) {
 	shell.Live = live
 	shell.LiveHref = liveToggleHref(r, live)
 
-	rows := toServiceRows(services, dur)
+	rows := toServiceRows(services, dur, winKey)
 	h.render(w, "overview", overviewData{
 		Shell:       shell,
 		Frozen:      h.frozenFor(tid),
@@ -321,7 +299,7 @@ func (h *Handler) serveEndpoints(w http.ResponseWriter, r *http.Request) {
 	rows := toEndpointRows(endpoints, dur)
 	sortEndpointRows(rows, sortKey)
 
-	crumbs := []crumb{{Label: "services", Href: "/"}, {Label: service}}
+	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service}}
 	h.render(w, "endpoints", endpointsData{
 		Shell:     h.buildShell(r, "overview", crumbs, service, true, winKey),
 		Service:   service,
@@ -329,52 +307,6 @@ func (h *Handler) serveEndpoints(w http.ResponseWriter, r *http.Request) {
 		Frozen:    h.frozenFor(tid),
 		KPIs:      endpointKPIs(rows),
 		Endpoints: rows,
-	})
-}
-
-// serveEndpointDetail renders level 3: the detail page (time-series chart via
-// /api/series, latency histogram via /api/histogram, and the class breakdown
-// beside the headline error rate).
-func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
-	tid, ok := h.resolveTenant(w, r)
-	if !ok {
-		return
-	}
-	service := r.PathValue("service")
-	method := r.URL.Query().Get("method")
-	route := r.URL.Query().Get("route")
-	winKey := normalizeWindow(r.URL.Query().Get("win"))
-	dur := windowDur[winKey]
-	from, to := windowRange(dur)
-
-	tq := h.q.Tenant(tid)
-	detail, err := tq.EndpointDetail(r.Context(), service, method, route, from, to)
-	if err != nil {
-		h.serverError(w, "endpoint detail query", err)
-		return
-	}
-
-	// The time-series chart is secondary to the detail headline: a series-query
-	// failure logs and renders an empty chart rather than 500-ing the page.
-	points, err := tq.SeriesOverTime(r.Context(), service, method, route, from, to, seriesStep)
-	if err != nil {
-		h.log.Error("web: detail series", slog.Any("err", err))
-		points = nil
-	}
-
-	dv := toDetailView(detail)
-	crumbs := []crumb{{Label: "services", Href: "/"}, {Label: service, Href: "/services/" + service}, {Label: method + " " + route}}
-	h.render(w, "detail", detailData{
-		Shell:      h.buildShell(r, "overview", crumbs, method+" "+route, true, winKey),
-		Service:    service,
-		Method:     method,
-		Route:      route,
-		Detail:     dv,
-		Stats:      detailStats(dv, dur.Seconds()),
-		StatusBars: statusBarsFor(dv),
-		Debug:      buildDebugContext(service, method, route, from, to, dv),
-		TSChart:    timeSeriesSVG(points, seriesStep),
-		HistChart:  histogramSVG(detail.Histogram, detail.P50, detail.P95, detail.P99),
 	})
 }
 

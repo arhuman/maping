@@ -27,7 +27,7 @@ var csrfKey = []byte("0123456789abcdef0123456789abcdef")
 func TestBuildWebConfigStaticDevMode(t *testing.T) {
 	// No control plane (cp nil, card nil, auth off): the dashboard renders the
 	// constant dev tenant and every control-plane-dependent field stays nil.
-	cfg := buildWebConfig(nopQuerier{}, nil, nil, false, devTenant, "", nil, testLogger())
+	cfg := buildWebConfig(nopQuerier{}, nil, nil, nil, false, devTenant, "", nil, testLogger())
 
 	assert.Nil(t, cfg.KeyAdmin, "no control plane -> no keys panel")
 	assert.Nil(t, cfg.Onboarding, "no control plane -> no onboarding source")
@@ -47,7 +47,7 @@ func TestBuildWebConfigWithControlPlane(t *testing.T) {
 	card := guardrail.NewCardinality()
 	// Control plane present + auth on: keys panel, onboarding, CSRF and frozen
 	// all wired, and the tenant resolver is the auth (session-context) one.
-	cfg := buildWebConfig(nopQuerier{}, cp, card, true, devTenant, "https://maping.example.com", csrfKey, testLogger())
+	cfg := buildWebConfig(nopQuerier{}, cp, nil, card, true, devTenant, "https://maping.example.com", csrfKey, testLogger())
 
 	assert.NotNil(t, cfg.KeyAdmin, "control plane -> keys panel present")
 	assert.NotNil(t, cfg.Onboarding, "control plane -> onboarding source present")
@@ -69,7 +69,7 @@ func TestBuildWebConfigOnboardingMapsFields(t *testing.T) {
 	cp := &fakeControlPlane{onboarding: []control.ServiceOnboarding{
 		{Service: "checkout", Instance: "pod-a", HandshakeAt: ts},
 	}}
-	cfg := buildWebConfig(nopQuerier{}, cp, nil, true, devTenant, "", csrfKey, testLogger())
+	cfg := buildWebConfig(nopQuerier{}, cp, nil, nil, true, devTenant, "", csrfKey, testLogger())
 
 	got, err := cfg.Onboarding(context.Background(), "tenant")
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestBuildWebConfigOnboardingMapsFields(t *testing.T) {
 
 func TestBuildWebConfigOnboardingPropagatesError(t *testing.T) {
 	cp := &fakeControlPlane{onboardErr: errors.New("boom")}
-	cfg := buildWebConfig(nopQuerier{}, cp, nil, true, devTenant, "", csrfKey, testLogger())
+	cfg := buildWebConfig(nopQuerier{}, cp, nil, nil, true, devTenant, "", csrfKey, testLogger())
 	_, err := cfg.Onboarding(context.Background(), "tenant")
 	require.Error(t, err)
 }
@@ -138,13 +138,13 @@ func TestKeyAdminRevokePassthrough(t *testing.T) {
 
 func TestBuildAuthNoStore(t *testing.T) {
 	// A nil member store (no control plane) yields no auth layer.
-	a, err := buildAuth(nil, "https://x", csrfKey, testLogger())
+	a, err := buildAuth(nil, nil, "https://x", csrfKey, testLogger())
 	require.NoError(t, err)
 	assert.Nil(t, a, "no store -> no auth layer (constant-tenant mode)")
 }
 
 func TestBuildAuthWithStore(t *testing.T) {
-	a, err := buildAuth(fakeMemberStore{}, "https://maping.example.com", csrfKey, testLogger())
+	a, err := buildAuth(fakeMemberStore{}, nil, "https://maping.example.com", csrfKey, testLogger())
 	require.NoError(t, err)
 	require.NotNil(t, a)
 	// No OIDC creds configured -> dev-login is the only enabled path.
@@ -154,7 +154,7 @@ func TestBuildAuthWithStore(t *testing.T) {
 }
 
 func TestBuildAuthShortKeyErrors(t *testing.T) {
-	_, err := buildAuth(fakeMemberStore{}, "https://x", []byte("too-short"), testLogger())
+	_, err := buildAuth(fakeMemberStore{}, nil, "https://x", []byte("too-short"), testLogger())
 	require.Error(t, err, "auth.New must reject a session key shorter than 32 bytes")
 }
 
