@@ -77,6 +77,18 @@ Creates `.env` for you, builds the server, starts ClickHouse and Postgres, and a
 schema at boot. Open the dashboard at http://localhost:8080. Auth is off by default — Postgres
 stays unused until you set `MAPING_POSTGRES_DSN`. No manual migration step needed.
 
+**Fill the dashboard with sample data:**
+
+```bash
+make generate-traffic            # tune volume with ROUNDS, e.g. make generate-traffic ROUNDS=30
+```
+
+Builds and runs the `example/` service against the running local stack, fires one request across
+every route (2xx, labelled 5xx, aborted, and a downstream call), waits for a flush, then stops it.
+The collector endpoint is pinned to `http://127.0.0.1:$MAPING_PORT`, so this only ever enriches the
+local server, never a remote collector. Reload the dashboard to see the `example-api` service with
+its endpoints, error classes, no-status reasons, downstream split, and per-instance USE gauges.
+
 **Instrument a Go service (three lines):**
 
 ```bash

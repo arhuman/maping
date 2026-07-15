@@ -43,10 +43,14 @@ VERSION ?=
 
 LINE_LIMIT ?= 500
 
+# Rounds of sample requests fired by `make generate-traffic` (one round hits
+# every example route once).
+ROUNDS ?= 20
+
 # ==================================================================================== #
 # PHONY DECLARATIONS (in alphabetical order)
 # ==================================================================================== #
-.PHONY: audit build checklen confirm down help integration local logs proto release restart test tidy tools up
+.PHONY: audit build checklen confirm down generate-traffic help integration local logs proto release restart test tidy tools up
 
 # ==================================================================================== #
 # STANDARD TARGETS (in alphabetical order)
@@ -75,6 +79,30 @@ checklen:
 ## down: stop and remove the running stack (local or prod)
 down:
 	$(BASE_COMPOSE) down
+
+## generate-traffic: run the example app against the LOCAL stack and fire sample requests so every dashboard panel fills with data (make generate-traffic ROUNDS=30)
+generate-traffic: $(ENV_FILE)
+	@set -a; . ./$(ENV_FILE) >/dev/null 2>&1; set +a; \
+		port="$${MAPING_PORT:-8080}"; \
+		case "$$port" in ''|*[!0-9]*) echo "MAPING_PORT must be a number, got '$$port'" >&2; exit 1;; esac; \
+		base="http://127.0.0.1:$$port"; \
+		key="$${MAPING_KEY:-dev-key}"; \
+		curl -fsS -o /dev/null "$$base/" || { echo "local stack unreachable at $$base -- run 'make local' first" >&2; exit 1; }; \
+		echo "== building example-api =="; \
+		(cd example && go build -o ../bin/example .) || exit 1; \
+		echo "== starting example-api, shipping to LOCAL $$base (logs: bin/example.log) =="; \
+		MAPING_KEY="$$key" MAPING_ENDPOINT="$$base" ./bin/example >bin/example.log 2>&1 & \
+		ex=$$!; trap 'kill $$ex 2>/dev/null; wait $$ex 2>/dev/null' EXIT; \
+		for i in $$(seq 1 40); do curl -fsS -o /dev/null http://127.0.0.1:9090/hello/ready 2>/dev/null && break; sleep 0.5; done; \
+		echo "== driving $(ROUNDS) rounds across every route =="; \
+		for i in $$(seq 1 $(ROUNDS)); do \
+			for p in /hello/world /downstream /db-error /upstream-timeout /timeout /canceled /boom; do \
+				curl -fsS -o /dev/null "http://127.0.0.1:9090$$p" 2>/dev/null || true; \
+			done; \
+		done; \
+		echo "== waiting ~12s for a flush so summaries ship =="; \
+		sleep 12; \
+		echo "traffic done -- open $$base to see the data"
 
 ## help: display this help message
 help:
