@@ -40,12 +40,18 @@
 -- ---------------------------------------------------------------------------
 -- max_duration_ns is a SimpleAggregateFunction(max, UInt64): the exact slowest
 -- request in the window, merged with max on collapse and across all rollup tiers.
--- exemplars is an Array(Tuple(DateTime64(3), UInt64, UInt32, String, String,
--- String)) = (at, duration_ns, status_code, trace_id, span_id, request_id): a
--- bounded, best-effort sample of real requests used to pivot from a spike to an
--- actual request. Exemplars live ONLY on this raw tier (under the 7-day TTL); the
--- rollup tables and MVs deliberately do NOT carry them. Both are backfilled
--- automatically via the ALTERs below (no drop needed).
+-- exemplars is a SimpleAggregateFunction(groupArrayArray, Array(Tuple(
+-- DateTime64(3), UInt64, UInt32, String, String, String))) = (at, duration_ns,
+-- status_code, trace_id, span_id, request_id): a bounded, best-effort sample of
+-- real requests used to pivot from a spike to an actual request. groupArrayArray
+-- CONCATENATES the arrays when same-key rows collapse — a plain Array column on
+-- an AggregatingMergeTree keeps one arbitrary row's value on collapse, silently
+-- dropping the other rows' exemplars (found by TestExemplarsForEndpoint). Growth
+-- stays bounded: each inserted row carries a client-capped sample, collapse only
+-- concatenates rows of the SAME series key and window, and reads are capped by
+-- maxExemplarsPerEndpoint. Exemplars live ONLY on this raw tier (under the 7-day
+-- TTL); the rollup tables and MVs deliberately do NOT carry them. Both are
+-- backfilled automatically via the ALTERs below (no drop needed).
 --
 -- DOWNSTREAM TIME (v0.1.0, pre-GA, disposable data)
 -- ---------------------------------------------------------------------------
@@ -113,7 +119,7 @@ CREATE TABLE IF NOT EXISTS summaries
     region              LowCardinality(String),
     instance_start_time SimpleAggregateFunction(max, DateTime64(3)),
     max_duration_ns     SimpleAggregateFunction(max, UInt64),
-    exemplars           Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String)),
+    exemplars           SimpleAggregateFunction(groupArrayArray, Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String))),
     error_classes       SimpleAggregateFunction(sumMap, Map(String, UInt64)),
     no_status_reasons   SimpleAggregateFunction(sumMap, Map(UInt8, UInt64)),
     sum_downstream_duration_ns SimpleAggregateFunction(sum, UInt64)
@@ -131,7 +137,15 @@ ALTER TABLE summaries ADD COLUMN IF NOT EXISTS environment         LowCardinalit
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS region              LowCardinality(String);
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS instance_start_time SimpleAggregateFunction(max, DateTime64(3));
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS max_duration_ns     SimpleAggregateFunction(max, UInt64);
-ALTER TABLE summaries ADD COLUMN IF NOT EXISTS exemplars           Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String));
+ALTER TABLE summaries ADD COLUMN IF NOT EXISTS exemplars           SimpleAggregateFunction(groupArrayArray, Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String)));
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS error_classes       SimpleAggregateFunction(sumMap, Map(String, UInt64));
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS no_status_reasons   SimpleAggregateFunction(sumMap, Map(UInt8, UInt64));
 ALTER TABLE summaries ADD COLUMN IF NOT EXISTS sum_downstream_duration_ns SimpleAggregateFunction(sum, UInt64);
+
+-- In-place type upgrade for instances whose summaries predates the
+-- groupArrayArray exemplars fix: as a plain Array column on this
+-- AggregatingMergeTree, same-key collapse kept one arbitrary row's array and
+-- dropped the rest. SimpleAggregateFunction shares the underlying type's storage
+-- layout, so this MODIFY is a metadata-only change and re-applying it on every
+-- boot is a no-op — same idempotence class as the ADD COLUMN backfills above.
+ALTER TABLE summaries MODIFY COLUMN exemplars SimpleAggregateFunction(groupArrayArray, Array(Tuple(DateTime64(3), UInt64, UInt32, String, String, String)));
