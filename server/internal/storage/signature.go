@@ -10,7 +10,7 @@ import (
 	"github.com/arhuman/maping/server/internal/tenant"
 )
 
-// This file holds the Phase-3 debuggability read queries: the error-class
+// This file holds debuggability read queries: the error-class
 // breakdown (what is behind the errors?) and the NO_STATUS reason breakdown
 // (timing out vs canceling vs crashing?). Both merge the bounded maps stored per
 // row with sumMap — so they work on any rollup tier — then explode the merged

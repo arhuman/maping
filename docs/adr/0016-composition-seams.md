@@ -30,7 +30,7 @@ passes functional options to `app.Run`:
   sources applied after the embedded core migrations, so out-of-tree schema
   layers on top without forking the core migration history.
 - **`WithLimitProvider(LimitProviderFactory)`** — decorate the core
-  billing-blind `LimitProvider` that drives the ingest guardrails (rate,
+  `LimitProvider` that drives the ingest guardrails (rate,
   cardinality, payload) with the composing build's own per-tenant policy.
 - **`WithLoginInterceptor(LoginInterceptorFactory)`** — a post-authentication
   hook the OIDC callback consults before the default first-login flow. The

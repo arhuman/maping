@@ -13,7 +13,7 @@ model (Sentry/PostHog/Axiom shape).
 
 Teams will not inject a closed-source binary into their production API hot path — an
 auditable, permissively-licensed client is effectively a product requirement, and it
-doubles as the primary trust/marketing surface. **MIT** is chosen for maximum
+doubles as the primary trust/adoption surface. **MIT** is chosen for maximum
 permissiveness and simplicity, minimizing adoption friction. Trade-off accepted: MIT
 carries no explicit patent grant (Apache-2.0 would); we judge the simplicity and
 familiarity of MIT worth more than that protection for a lightweight instrumentation

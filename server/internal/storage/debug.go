@@ -10,7 +10,7 @@ import (
 	"github.com/arhuman/maping/server/internal/tenant"
 )
 
-// This file holds the Phase-0 debuggability read queries: the instance-outlier
+// This file holds debuggability read queries: the instance-outlier
 // breakdown (is a degradation one replica or fleet-wide?) and the latency split
 // by status class (is the latency rise on failures or also on 2xx?). Both are
 // pure read queries over columns that already exist; they reuse the same frozen

@@ -73,11 +73,8 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html>
     </a>
 
     <div style="flex:1;display:flex;flex-direction:column;justify-content:center;max-width:392px;width:100%;margin:0 auto;padding:40px 0;">
-      <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:8px;padding:5px 12px;border:1px solid rgba(180,241,74,.28);background:rgba(180,241,74,.06);border-radius:100px;font:600 10.5px 'JetBrains Mono',monospace;color:#B4F14A;letter-spacing:.5px;">
-        <span style="width:6px;height:6px;border-radius:50%;background:#B4F14A;display:inline-block;"></span>FREE TIER · NO CARD
-      </div>
       <h1 style="margin:20px 0 8px;font-size:32px;font-weight:800;letter-spacing:-.9px;">Sign in to mAPI-ng</h1>
-      <p style="margin:0 0 26px;font-size:15px;line-height:1.55;color:#9AA4B2;">One account for your org's dashboard, ingest keys, and billing. New here? The same button gets you started.</p>
+      <p style="margin:0 0 26px;font-size:15px;line-height:1.55;color:#9AA4B2;">One account for your org's dashboard and ingest keys. New here? The same button gets you started.</p>
 
       <div style="display:flex;flex-direction:column;gap:11px;">
         {{if .GitHub}}<a href="/auth/github/start" style="display:flex;align-items:center;justify-content:center;gap:11px;padding:13px 16px;background:#181F28;border:1px solid rgba(255,255,255,.1);border-radius:11px;font:700 14.5px 'Hanken Grotesk',sans-serif;color:#E8EDF3;">
@@ -112,8 +109,6 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html>
 
     <div style="display:flex;align-items:center;gap:16px;font:500 12px 'JetBrains Mono',monospace;color:#69727F;">
       <a href="/">← Back to home</a>
-      <span style="opacity:.4;">/</span>
-      <a href="/pricing">Pricing</a>
     </div>
   </div>
 

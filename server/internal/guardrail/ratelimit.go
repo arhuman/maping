@@ -42,7 +42,7 @@ func NewRateLimiter(provider LimitProvider) *RateLimiter {
 // the per-tenant limiter is created lazily on first use.
 //
 // A cached limiter is re-tuned to the currently resolved budget on every call, so
-// a plan change (upgrade/downgrade) or a subscription-lifecycle suspension takes
+// a plan change (upgrade/downgrade) or a suspension takes
 // effect immediately without a process restart. In particular a suspended tenant
 // resolves to MaxRPS:0/Burst:0, which SetLimit/SetBurst turn into a hard deny —
 // the enforcement lever the control plane relies on. SetLimit/SetBurst preserve

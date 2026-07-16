@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// The extension seam: a composed build (e.g. a separate enterprise module that
-// imports server/app) adds HTTP surfaces and background work through Run's
+// The extension seam: a composed build (a separate module that imports
+// server/app) adds HTTP surfaces and background work through Run's
 // functional options rather than by editing the core wiring. Every exported type
 // here carries only externally-nameable types (stdlib + pgx), so a registrar can
 // be implemented from another module that cannot import server/internal/*.
@@ -25,7 +25,7 @@ type RouteContext struct {
 	// verification, redirect/401 on failure) so an extension can mount its own
 	// authenticated routes with the same gate the dashboard uses. It is nil when
 	// auth is off (no control plane) — a registrar that needs auth must check and
-	// mount nothing, exactly as the core billing wiring did.
+	// mount nothing.
 	Gate func(http.Handler) http.Handler
 	// SessionOrg reads the caller's verified org id from a request that has passed
 	// through Gate. It is the ONLY sanctioned way for an extension to learn the
@@ -44,17 +44,16 @@ type JobContext struct {
 
 // RouteRegistrar mounts additional routes on the server mux. It runs after the
 // core routes, so its patterns must not collide with the core surfaces
-// (/healthz, /, /pricing, the /login and /auth routes, /billing/*, and the
-// ingest path).
+// (/healthz, /, the /login and /auth routes, and the ingest path).
 type RouteRegistrar func(RouteContext)
 
 // BackgroundJob is a long-running task started after boot and stopped at
-// shutdown via JobContext.Ctx (the same lifecycle as the billing reconciler).
+// shutdown via JobContext.Ctx.
 type BackgroundJob func(JobContext)
 
-// LimitProviderFactory decorates the core (billing-blind) LimitProvider with the
-// injecting build's own behavior — e.g. a subscription lifecycle (suspend/trial)
-// the composing build reads from its own schema. base is the plain plan-budget provider; pool is the
+// LimitProviderFactory decorates the core LimitProvider with the injecting
+// build's own behavior — e.g. an account lifecycle (suspend/trial) the
+// composing build reads from its own schema. base is the plain plan-budget provider; pool is the
 // control-plane pool (never nil when this factory runs, since limits require a
 // control plane). It returns the provider the ingest guardrails resolve through.
 // It names the public LimitProvider alias so a composing module (which cannot
@@ -106,17 +105,17 @@ func WithBackgroundJob(j BackgroundJob) Option {
 
 // WithExtraMigrations registers an additional control-plane migration source
 // applied, in lexical filename order, AFTER the embedded core migrations. A
-// composing build passes its own schema (paid tiers, billing tables) here so the
-// public core never carries it. Multiple sources apply in registration order.
+// composing build passes its own schema (its own plan rows and tables) here so
+// the public core never carries it. Multiple sources apply in registration order.
 // Files must be additive and idempotent, exactly like the core migrations. It has
 // no effect in static dev mode (no control plane to migrate).
 func WithExtraMigrations(fsys fs.FS, dir string) Option {
 	return func(o *options) { o.migrations = append(o.migrations, migrationSource{fsys: fsys, dir: dir}) }
 }
 
-// WithLimitProvider decorates the core billing-blind LimitProvider that drives
-// the ingest guardrails (rate, payload, cardinality). The composing build passes
-// its own provider to layer the subscription lifecycle on top; the public
+// WithLimitProvider decorates the core LimitProvider that drives the ingest
+// guardrails (rate, payload, cardinality). The composing build passes
+// its own provider to layer its own limit policy on top; the public
 // default (no option) resolves the plain plan budget. It has no effect in static
 // dev mode, where there is no control plane to resolve limits.
 func WithLimitProvider(factory LimitProviderFactory) Option {
@@ -139,12 +138,12 @@ func WithMemberAdmin(factory MemberAdminFactory) Option {
 	return func(o *options) { o.memberAdmin = factory }
 }
 
-// WithPublicHome wires the anonymous landing page served at "/" (e.g. a marketing
-// home). When set, an unauthenticated visitor to "/" gets this handler while
+// WithPublicHome wires the anonymous landing page served at "/". When set, an
+// unauthenticated visitor to "/" gets this handler while
 // signed-in users and every dashboard sub-path fall through to the gated
-// dashboard; a composing build registers any companion routes (e.g. /pricing) via
+// dashboard; a composing build registers any companion routes via
 // WithRoutes. Public default: nil, so anonymous "/" redirects to /login (the
-// self-host/OSS surface serves no marketing).
+// self-host/OSS surface serves no landing page).
 func WithPublicHome(home http.HandlerFunc) Option {
 	return func(o *options) { o.publicHome = home }
 }

@@ -58,12 +58,12 @@ func TestOverviewTriageSortForUnhealthy(t *testing.T) {
 	// A healthy service drills to the default (traffic) sort — no sort hint.
 	healthy := newServer(t, Config{Tenant: constTenant, Querier: fakeQuerier{
 		hasData:  true,
-		services: []storage.ServiceStat{{Service: "billing", Count: 1000, ErrorRate: 0.0}},
+		services: []storage.ServiceStat{{Service: "inventory", Count: 1000, ErrorRate: 0.0}},
 	}})
 	_, body2 := getBody(t, healthy.URL+"/")
 	assert.NotContains(t, body2, "sort=error")
 	// The drill href carries the active window so navigation preserves the lookback.
-	assert.Contains(t, body2, `href="/services/billing?win=1h"`)
+	assert.Contains(t, body2, `href="/services/inventory?win=1h"`)
 }
 
 func TestDetailRendersDebugContext(t *testing.T) {
@@ -85,7 +85,7 @@ func TestDetailRendersDebugContext(t *testing.T) {
 	assert.Contains(t, body, "dominant error 5xx") // 5xx (7) beats 4xx (3)
 	assert.Contains(t, body, "p95 210 ms")
 	assert.Contains(t, body, "p99 480 ms")
-	// The copy button + helper (slice 6) make the block one-click shareable.
+	// The copy button + helper make the block one-click shareable.
 	assert.Contains(t, body, `data-copy="mp-debug"`)
 	assert.Contains(t, body, `src="/assets/copy.js"`)
 }

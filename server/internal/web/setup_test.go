@@ -77,7 +77,7 @@ func TestSetupCreateRevealsOnce(t *testing.T) {
 	body := readBody(t, resp)
 	assert.Contains(t, body, "mk_live_abc.def456") // token revealed once
 	assert.Contains(t, body, "COPY IT NOW")
-	assert.Contains(t, body, `data-copy="mp-newkey"`) // copy hook (slice 6)
+	assert.Contains(t, body, `data-copy="mp-newkey"`) // copy hook
 	assert.Contains(t, body, `src="/assets/copy.js"`) // helper loaded
 }
 
