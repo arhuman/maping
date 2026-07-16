@@ -207,7 +207,7 @@ func (h *Handler) serveRevokeInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveRemoveMember removes a member and redirects back to Setup (PRG). Admin-only.
-// The store refuses to remove the billing owner or the last admin; such a rejection
+// The store may refuse the removal (e.g. the last admin); such a rejection
 // logs and still redirects, leaving the member listed.
 //
 //nolint:dupl // thin adapter over teamMutation; only the store call/label differ.

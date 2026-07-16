@@ -57,8 +57,9 @@ configured client-side: the **Ingest key** encodes the tenant, and the server
 resolves it from the key.
 
 **Member / roles** — humans in an organization, authenticated via **OIDC only
-(GitHub/Google), no passwords** in v1. Two roles: **admin** (manage keys, members,
-billing) and **member** (read dashboards). Fuller RBAC and SAML/SSO are v2/enterprise.
+(GitHub/Google), no passwords** in v1. Two roles: **admin** (manage keys and
+members) and **member** (read dashboards). Fuller RBAC and SAML/SSO are out of
+scope for v1.
 
 **Ingest key** — a secret a client needs. Delivered via `MAPING_KEY` env var (or in
 code). Encodes the tenant; it is the *only* required client configuration. A tenant

@@ -150,8 +150,8 @@ func Run(log *slog.Logger, opts ...Option) error {
 	mux.HandleFunc("GET /healthz", healthHandler(&ready))
 	// The public landing page ("/" for anonymous visitors) is opt-in via
 	// WithPublicHome; a self-host/OSS deployment wires none, so anonymous "/"
-	// redirects to /login. A composing build supplies the marketing home and
-	// registers /pricing via WithRoutes.
+	// redirects to /login. A composing build supplies the landing page and
+	// registers any companion routes via WithRoutes.
 	mountDashboard(mux, webHandler, o.publicHome, authLayer, log)
 	mountIngest(mux, ingestHandler, maxBodyCeiling(log))
 
@@ -159,8 +159,7 @@ func Run(log *slog.Logger, opts ...Option) error {
 	// ServeMux precedence. The pool is nil in static dev mode (no control plane).
 	// gate/sessionOrg give a registrar the dashboard auth middleware and the
 	// verified-org reader (both nil when auth is off), so a composing build mounts
-	// its own authenticated routes — e.g. billing checkout/portal — without
-	// importing the internal auth package.
+	// its own authenticated routes without importing the internal auth package.
 	var pool *pgxpool.Pool
 	if store != nil {
 		pool = store.Pool()
@@ -175,8 +174,8 @@ func Run(log *slog.Logger, opts ...Option) error {
 	}
 	mountExtensions(mux, o.routes, pool, gate, sessionOrg, log)
 
-	// Background loops (extension jobs, e.g. the billing reconciler) share one
-	// context, cancelled on shutdown so every goroutine exits before the pool closes.
+	// Background loops (extension jobs) share one context, cancelled on
+	// shutdown so every goroutine exits before the pool closes.
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	defer cancelBg()
 	startBackgroundJobs(bgCtx, o.jobs, pool, log)
@@ -236,7 +235,7 @@ func healthHandler(ready *atomic.Bool) http.HandlerFunc {
 // live on a sub-mux wrapped by auth.Middleware while the open login routes
 // register directly on the outer mux — Go 1.22 ServeMux precedence makes those
 // more-specific patterns bypass the gate. "/" itself dispatches: when a public
-// home is wired (a composing build's marketing landing) an anonymous visitor sees
+// home is wired (a composing build's landing page) an anonymous visitor sees
 // it and a signed-in one gets the dashboard; when it is nil (self-host/OSS/dev)
 // anonymous "/" redirects to /login. Either way "/" is a bare (method-less)
 // pattern so it does not conflict with the more-specific ingest path.
@@ -250,8 +249,8 @@ func mountDashboard(mux *http.ServeMux, webHandler *web.Handler, home http.Handl
 	gated := authLayer.Middleware(webMux)
 	if home != nil {
 		// Public home wired: anonymous "/" serves it; signed-in users and every
-		// sub-path fall through to the gated dashboard. Companion routes (e.g.
-		// /pricing) are registered by the composing build via WithRoutes.
+		// sub-path fall through to the gated dashboard. Companion routes are
+		// registered by the composing build via WithRoutes.
 		mux.Handle("/", rootHandler(authLayer, gated, home))
 	} else {
 		// No public home: "/" is the gated dashboard (anonymous -> /login).
@@ -338,9 +337,9 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger, limitFactory Limit
 		}, nil
 	}
 
-	// A composing build's extra migration sources (paid tiers, billing schema)
-	// apply after the embedded core migrations, layering commercial schema on top
-	// of the core without the core carrying it.
+	// A composing build's extra migration sources apply after the embedded core
+	// migrations, layering the build's own schema on top of the core without
+	// the core carrying it.
 	ctrlOpts := make([]control.Option, 0, len(migrations))
 	for _, m := range migrations {
 		ctrlOpts = append(ctrlOpts, control.WithExtraMigrations(m.fsys, m.dir))
@@ -358,9 +357,9 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger, limitFactory Limit
 		return ingestWiring{}, fmt.Errorf("seed dev key: %w", err)
 	}
 
-	// The core provider is billing-blind (plain plan budget). A composing build
-	// decorates it via WithLimitProvider (adding, e.g., the subscription
-	// lifecycle); the public default leaves it untouched. Every ingest
+	// The core provider resolves the plain plan budget. A composing build
+	// decorates it via WithLimitProvider (layering its own limit policy);
+	// the public default leaves it untouched. Every ingest
 	// guardrail resolves through this single provider so the decorator applies
 	// uniformly to rate, cardinality, and payload.
 	var provider guardrail.LimitProvider = limitProvider{store: store}

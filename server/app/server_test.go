@@ -38,8 +38,8 @@ func TestNewHTTPServer(t *testing.T) {
 	assert.NotZero(t, srv.ReadHeaderTimeout, "a read-header timeout is set")
 }
 
-// stubHome is a stand-in public-home handler for the dashboard-wiring tests (the
-// real marketing home lives in a composing build now).
+// stubHome is a stand-in public-home handler for the dashboard-wiring tests (a
+// real one is supplied by a composing build).
 func stubHome() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("PUBLIC HOME"))
@@ -67,8 +67,8 @@ func TestMountDashboardOpenWhenNoAuth(t *testing.T) {
 
 func TestMountDashboardAuthAnonSeesPublicHome(t *testing.T) {
 	// auth on with a public home wired: an anonymous "/" serves the home (not a
-	// redirect), while dashboard sub-paths stay gated. Companion routes like
-	// /pricing are the composing build's concern (WithRoutes), not mountDashboard's.
+	// redirect), while dashboard sub-paths stay gated. Companion routes are the
+	// composing build's concern (WithRoutes), not mountDashboard's.
 	authLayer, err := buildAuth(fakeMemberStore{}, nil, "https://maping.example.com", csrfKey, testLogger())
 	require.NoError(t, err)
 	require.NotNil(t, authLayer)
@@ -118,8 +118,8 @@ func TestMountDashboardAuthNoPublicHomeGatesRoot(t *testing.T) {
 }
 
 func TestRootHandlerDispatch(t *testing.T) {
-	// rootHandler serves marketing to anonymous "/", and the gated dashboard to a
-	// signed-in "/" and to every non-root path.
+	// rootHandler serves the public home to anonymous "/", and the gated dashboard
+	// to a signed-in "/" and to every non-root path.
 	authLayer, err := buildAuth(fakeMemberStore{}, nil, "https://maping.example.com", csrfKey, testLogger())
 	require.NoError(t, err)
 
@@ -132,13 +132,13 @@ func TestRootHandlerDispatch(t *testing.T) {
 	require.NotEmpty(t, cookies, "dev-login must mint a session cookie")
 
 	gated := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("DASHBOARD")) })
-	home := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("MARKETING")) })
+	home := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("HOME")) })
 	h := rootHandler(authLayer, gated, home)
 
-	// Anonymous "/" -> marketing.
+	// Anonymous "/" -> public home.
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	assert.Equal(t, "MARKETING", rec.Body.String())
+	assert.Equal(t, "HOME", rec.Body.String())
 
 	// Signed-in "/" -> gated dashboard.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -149,7 +149,7 @@ func TestRootHandlerDispatch(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	assert.Equal(t, "DASHBOARD", rec.Body.String())
 
-	// Anonymous non-root path -> gated (never marketing).
+	// Anonymous non-root path -> gated (never the public home).
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/setup", nil))
 	assert.Equal(t, "DASHBOARD", rec.Body.String())

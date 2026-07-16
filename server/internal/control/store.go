@@ -44,8 +44,8 @@ type KeyInfo struct {
 var migrationsFS embed.FS
 
 // MigrationSource is a directory of ordered .sql files applied on top of the
-// embedded core schema. It is the extension seam for a composed build (e.g. an
-// enterprise module) to add its own tables/columns without editing core
+// embedded core schema. It is the extension seam for a composed build to add
+// its own tables/columns without editing core
 // migrations: the files must be additive and idempotent, exactly like core.
 type MigrationSource struct {
 	FS  fs.FS
@@ -83,7 +83,7 @@ type querier interface {
 type Store struct {
 	pool *pgxpool.Pool
 	// now is an injectable clock retained for time-dependent control-plane
-	// operations; the limits lookup is billing-blind and no longer reads it.
+	// operations; the limits lookup no longer reads it.
 	now func() time.Time
 }
 
@@ -325,7 +325,7 @@ func (s *Store) Limits(ctx context.Context, tenant string) (guardrail.Limits, er
 	return queryLimits(ctx, s.pool, tenant)
 }
 
-// queryLimits is the parameterized, billing-blind limits lookup against a
+// queryLimits is the parameterized limits lookup against a
 // querier. It joins the org's plan to its plan_limits budget and returns exactly
 // that budget; a missing org/plan row falls back to DefaultLimits.
 func queryLimits(ctx context.Context, q querier, tenant string) (guardrail.Limits, error) {

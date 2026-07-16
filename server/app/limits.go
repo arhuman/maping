@@ -13,8 +13,8 @@ import (
 // through it with no adapter.
 type (
 	// LimitProvider is the per-tenant limits source the ingest guardrails resolve
-	// through. A composing build implements it to layer its own behavior (e.g. the
-	// billing subscription lifecycle) over the core plan budget.
+	// through. A composing build implements it to layer its own behavior (e.g. an
+	// account lifecycle) over the core plan budget.
 	LimitProvider = guardrail.LimitProvider
 	// Limits is a tenant's resolved guardrail budget (rate, burst, cardinality,
 	// payload, retention).

@@ -6,8 +6,8 @@ status: accepted
 
 RED metrics and the per-instance / per-status-class breakdowns say *that* an
 endpoint degraded and *where* (which replica, which status class), but not
-*which release* caused it — the single most common root-cause question. Phase 1
-adds a deploy identity so a regression can be attributed to a version.
+*which release* caused it — the single most common root-cause question. A
+deploy identity closes that gap: a regression can be attributed to a version.
 
 ## Decision
 

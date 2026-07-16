@@ -1,10 +1,10 @@
 -- 0005_plan_seats.sql — per-plan seat cap on the plan_limits table.
 --
--- max_seats is the one commercial-adjacent limit the core carries, because the
--- multi-user invite/seat path (control.CreateInvite / SeatUsage / RemoveMember)
--- enforces it at invite and accept time (never in ingest). Every core plan is an
+-- max_seats caps how many members an org can hold. The multi-user member path
+-- (a composing build's MemberAdmin store) enforces it at invite and accept time
+-- (never in ingest). Every core plan is an
 -- org-of-one, so the default is 1; a composing build seeds higher caps for its
--- paid tiers via its own migration source (WithExtraMigrations).
+-- own plan tiers via its own migration source (WithExtraMigrations).
 --
 -- Idempotent (ADD COLUMN IF NOT EXISTS) so it re-applies on every boot and never
 -- clobbers an operator-tuned row.
