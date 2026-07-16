@@ -367,6 +367,10 @@ func buildIngestWiring(ctx context.Context, log *slog.Logger, limitFactory Limit
 	if limitFactory != nil {
 		provider = limitFactory(provider, store.Pool())
 	}
+	// The TTL cache wraps the WHOLE chain (core provider plus any decorator) so
+	// a decorator's own queries are amortized too; the staleness bound for plan
+	// changes and suspend decisions is the cache TTL.
+	provider = guardrail.NewCachedLimitProvider(provider)
 	rl := guardrail.NewRateLimiter(provider)
 	card := guardrail.NewCardinality()
 
