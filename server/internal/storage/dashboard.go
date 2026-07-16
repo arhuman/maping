@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -77,6 +78,12 @@ type EndpointDetail struct {
 	StatusCodes   map[uint32]uint64
 }
 
+// aggregateRowCap bounds the service- and endpoint-overview aggregates. The
+// dashboard renders a top-N table; a tenant with pathological service/endpoint
+// cardinality must not make the overview query unbounded. Busiest rows first
+// is already the ORDER BY, so the cap keeps exactly the rows the page shows.
+const aggregateRowCap = 500
+
 // percentileExpr builds the frozen quantile SQL expression against the aliases
 // ks (sorted bucket indices) and cs (cumulative counts) already defined in the
 // WITH clause, for quantile q against total_count. It is the same math as
@@ -108,7 +115,8 @@ WHERE tenant = ?
   AND window_start >= ?
   AND window_start < ?
 GROUP BY service
-ORDER BY cnt DESC`
+ORDER BY cnt DESC
+LIMIT ` + strconv.Itoa(aggregateRowCap)
 
 // endpointsQueryTemplate aggregates one row per (method, route_template) for a
 // single service over the whole window.
@@ -136,7 +144,8 @@ WHERE tenant = ?
   AND window_start >= ?
   AND window_start < ?
 GROUP BY method, route_template
-ORDER BY cnt DESC`
+ORDER BY cnt DESC
+LIMIT ` + strconv.Itoa(aggregateRowCap)
 
 // endpointDetailQueryTemplate returns the single aggregate row for one endpoint:
 // the merged sketch (as sorted parallel index/count arrays for the histogram),
