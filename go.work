@@ -3,6 +3,7 @@ go 1.26.5
 use (
 	./client
 	./client/gin
+	./client/nethttp
 	./example
 	./proto
 	./server
