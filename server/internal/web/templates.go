@@ -15,6 +15,7 @@ var templateFuncs = template.FuncMap{
 	"pctd":     fmtPctD,
 	"rated":    fmtRate,
 	"bytes":    fmtBytes,
+	"fmtCores": fmtCores,
 	"errc":     errClass,
 	"p99c":     p99Class,
 	"hc":       healthClass,

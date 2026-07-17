@@ -161,3 +161,95 @@ func TestBuildPerformance(t *testing.T) {
 		assert.Equal(t, "100%", p.SummaryBarPct)
 	})
 }
+
+// TestToResourceRowsIntensities asserts the raw per-window CPU and GC-pause deltas
+// are converted into intensities: average cores consumed and STW GC-pause share of
+// wall time, with the window guard and the GC-share clamp.
+func TestToResourceRowsIntensities(t *testing.T) {
+	const winSec = 100.0 // 100s window -> 1e11 ns
+
+	t.Run("cores and gc share", func(t *testing.T) {
+		// 87s of CPU over a 100s window -> 0.87 cores; 1.2s STW pause -> 1.2%.
+		rows := toResourceRows([]storage.InstanceResourceStat{
+			{Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048, HeapAllocBytes: 1024, Goroutines: 42},
+		}, winSec)
+		require.Len(t, rows, 1)
+		assert.InDelta(t, 0.87, rows[0].CoresUsed, 1e-9)
+		assert.InDelta(t, 0.012, rows[0].GCShare, 1e-9)
+		// Gauges pass through unchanged.
+		assert.Equal(t, 2048.0, rows[0].RSSBytes)
+		assert.Equal(t, 1024.0, rows[0].HeapBytes)
+		assert.Equal(t, uint64(42), rows[0].Goroutines)
+	})
+
+	t.Run("gc share clamps to 1", func(t *testing.T) {
+		// Overlapping/merged samples could push summed GC pause past wall time.
+		rows := toResourceRows([]storage.InstanceResourceStat{
+			{Instance: "pod-a", GCPauseNs: 2 * winSec * 1e9},
+		}, winSec)
+		require.Len(t, rows, 1)
+		assert.Equal(t, 1.0, rows[0].GCShare)
+	})
+
+	t.Run("non-positive window yields zero intensities", func(t *testing.T) {
+		rows := toResourceRows([]storage.InstanceResourceStat{
+			{Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048},
+		}, 0)
+		require.Len(t, rows, 1)
+		assert.Zero(t, rows[0].CoresUsed)
+		assert.Zero(t, rows[0].GCShare)
+		// Byte gauges are independent of the window and still map through.
+		assert.Equal(t, 2048.0, rows[0].RSSBytes)
+	})
+}
+
+// TestToInstanceRowsOutlier asserts the p95 outlier flag: it fires only with at
+// least two trafficked instances and a p95 both >= 2x the fleet median and above
+// the 100ms floor, and never on a tight fleet.
+func TestToInstanceRowsOutlier(t *testing.T) {
+	t.Run("one replica flagged, fleet clean", func(t *testing.T) {
+		// Fleet median p95 = 0.1s; pod-c at 0.9s clears both 2x and the 100ms floor.
+		rows := toInstanceRows([]storage.InstanceStat{
+			{Instance: "pod-a", Count: 100, P95: 0.1},
+			{Instance: "pod-b", Count: 100, P95: 0.1},
+			{Instance: "pod-c", Count: 100, P95: 0.9},
+		})
+		require.Len(t, rows, 3)
+		assert.False(t, rows[0].IsOutlier)
+		assert.False(t, rows[1].IsOutlier)
+		assert.True(t, rows[2].IsOutlier)
+	})
+
+	t.Run("floor gates a fast fleet", func(t *testing.T) {
+		// pod-c is 5x the median but still under 100ms -> not an outlier.
+		rows := toInstanceRows([]storage.InstanceStat{
+			{Instance: "pod-a", Count: 100, P95: 0.01},
+			{Instance: "pod-b", Count: 100, P95: 0.01},
+			{Instance: "pod-c", Count: 100, P95: 0.05},
+		})
+		for _, r := range rows {
+			assert.False(t, r.IsOutlier, "%s under the 100ms floor", r.Instance)
+		}
+	})
+
+	t.Run("single trafficked instance never flags", func(t *testing.T) {
+		// Only one instance has traffic, so there is no fleet to compare against.
+		rows := toInstanceRows([]storage.InstanceStat{
+			{Instance: "pod-a", Count: 100, P95: 5.0},
+			{Instance: "pod-b", Count: 0, P95: 0},
+		})
+		assert.False(t, rows[0].IsOutlier)
+		assert.False(t, rows[1].IsOutlier)
+	})
+
+	t.Run("tight fleet has no outlier", func(t *testing.T) {
+		rows := toInstanceRows([]storage.InstanceStat{
+			{Instance: "pod-a", Count: 100, P95: 0.2},
+			{Instance: "pod-b", Count: 100, P95: 0.21},
+			{Instance: "pod-c", Count: 100, P95: 0.22},
+		})
+		for _, r := range rows {
+			assert.False(t, r.IsOutlier, "%s within a tight fleet", r.Instance)
+		}
+	})
+}

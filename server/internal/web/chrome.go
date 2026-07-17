@@ -251,6 +251,9 @@ func fmtMsUnit(sec float64) string {
 // fmtMsFull is the combined "value unit" form for table cells ("88 ms").
 func fmtMsFull(sec float64) string { return fmtMsVal(sec) + " " + fmtMsUnit(sec) }
 
+// fmtCores renders an average-cores-consumed value as "0.87 cores" (two decimals).
+func fmtCores(c float64) string { return strconv.FormatFloat(c, 'f', 2, 64) + " cores" }
+
 // fmtBytes renders a per-request average byte size human-readably: <1KiB -> "128 B",
 // <1MiB -> "1.9 KB", else "3.2 MB". The input is a float average (sum/count), so
 // sub-byte fractions round to whole bytes. Uses 1024-based units, dropping a

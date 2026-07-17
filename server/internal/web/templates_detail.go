@@ -71,11 +71,11 @@ const tplDetailHTML = `
     </div>
     {{range .Instances}}
     <div class="trow" style="grid-template-columns:2fr 1fr 1fr .8fr .8fr .8fr .9fr .9fr;cursor:default;">
-      <div style="font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{.Instance}}</div>
+      <div style="font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{if .IsOutlier}}<span class="dot dot-warn" style="margin-right:7px;"></span>{{end}}{{.Instance}}</div>
       <div class="tnum">{{.Count}}</div>
       <div class="tnum {{errc .ErrorRate}}">{{pctd .ErrorRate}}</div>
       <div class="tnum-s">{{msf .P50}}</div>
-      <div class="tnum-s">{{msf .P95}}</div>
+      <div class="tnum-s{{if .IsOutlier}} c-warn{{end}}">{{msf .P95}}</div>
       <div class="tnum-s {{p99c .P99}}">{{msf .P99}}</div>
       <div class="tnum-s">{{bytes .ReqBytesAvg}}</div>
       <div class="tnum-s">{{bytes .RespBytesAvg}}</div>
@@ -196,13 +196,13 @@ const tplDetailHTML = `
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Resources</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">saturation per instance — GC or goroutines behind a slowdown?</span></div>
     <div class="thead" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;">
-      <span>INSTANCE</span><span style="text-align:right;">CPU</span><span style="text-align:right;">GC PAUSE</span><span style="text-align:right;">RSS</span><span style="text-align:right;">HEAP</span><span style="text-align:right;">GOROUTINES</span>
+      <span>INSTANCE</span><span style="text-align:right;">CPU</span><span style="text-align:right;">GC</span><span style="text-align:right;">RSS</span><span style="text-align:right;">HEAP</span><span style="text-align:right;">GOROUTINES</span>
     </div>
     {{range .Resources}}
     <div class="trow" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;cursor:default;">
       <div style="font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{.Instance}}</div>
-      <div class="tnum-s">{{msf .CPUSeconds}}</div>
-      <div class="tnum-s">{{msf .GCSeconds}}</div>
+      <div class="tnum-s">{{fmtCores .CoresUsed}}</div>
+      <div class="tnum-s">{{pctd .GCShare}}</div>
       <div class="tnum-s">{{bytes .RSSBytes}}</div>
       <div class="tnum-s">{{bytes .HeapBytes}}</div>
       <div class="tnum">{{.Goroutines}}</div>

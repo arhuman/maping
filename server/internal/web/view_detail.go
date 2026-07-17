@@ -80,13 +80,36 @@ type instanceStatRow struct {
 	P99          float64
 	ReqBytesAvg  float64
 	RespBytesAvg float64
+	IsOutlier    bool // p95 discriminates this replica from the fleet (see toInstanceRows)
 }
 
+// p95OutlierFloor is the absolute latency floor (100ms) a replica's p95 must clear
+// before it can be flagged an outlier, so a fleet of fast replicas never flags a
+// still-fast one purely on a relative multiple.
+const p95OutlierFloor = 0.1
+
 // toInstanceRows maps the storage instance-outlier stats into display rows,
-// preserving the storage order (by instance).
+// preserving the storage order (by instance). It flags a replica IsOutlier when the
+// fleet has at least two trafficked instances and this row's p95 is both at least
+// twice the fleet median p95 and above the 100ms floor — the signal that a
+// degradation is localized to one replica rather than fleet-wide.
 func toInstanceRows(stats []storage.InstanceStat) []instanceStatRow {
+	var p95s []float64
+	for _, s := range stats {
+		if s.Count > 0 {
+			p95s = append(p95s, s.P95)
+		}
+	}
+	var med float64
+	if len(p95s) > 0 {
+		sorted := make([]float64, len(p95s))
+		copy(sorted, p95s)
+		sort.Float64s(sorted)
+		med = median(sorted)
+	}
 	out := make([]instanceStatRow, 0, len(stats))
 	for _, s := range stats {
+		isOutlier := len(p95s) >= 2 && s.P95 >= 2*med && s.P95 >= p95OutlierFloor
 		out = append(out, instanceStatRow{
 			Instance:     s.Instance,
 			Count:        s.Count,
@@ -97,6 +120,7 @@ func toInstanceRows(stats []storage.InstanceStat) []instanceStatRow {
 			P99:          s.P99,
 			ReqBytesAvg:  s.ReqBytesAvg,
 			RespBytesAvg: s.RespBytesAvg,
+			IsOutlier:    isOutlier,
 		})
 	}
 	return out
@@ -352,29 +376,40 @@ func toDownstreamView(s storage.DownstreamStat) downstreamView {
 }
 
 // resourceRow is one rendered row of the per-instance USE (saturation) panel: a
-// replica's CPU and GC-pause time over the window plus its peak memory and
+// replica's per-window CPU intensity and GC-pause share plus its peak memory and
 // goroutine gauges. Rows arrive ordered by instance from storage. It answers "did
-// p99 rise because this replica's GC pauses tripled or goroutines blew up?".
+// p99 rise because this replica's GC ate wall time or goroutines blew up?".
 type resourceRow struct {
 	Instance   string
-	CPUSeconds float64 // CPU time consumed over the window, in seconds (for msf)
-	GCSeconds  float64 // GC pause time over the window, in seconds
+	CoresUsed  float64 // average cores consumed over the window (cpu_ns / window_ns)
+	GCShare    float64 // fraction of wall time in STW GC pause, 0..1 (for pctd)
 	RSSBytes   float64 // peak resident-memory proxy, in bytes (for the bytes fmt)
 	HeapBytes  float64 // peak live-heap bytes
 	Goroutines uint64  // peak goroutine count
 }
 
 // toResourceRows maps the storage per-instance USE stats into display rows,
-// converting nanosecond counters to seconds (so they format through the same msf
-// helper) and byte counts to float64 for the bytes formatter. Storage order (by
-// instance) is preserved.
-func toResourceRows(stats []storage.InstanceResourceStat) []resourceRow {
+// converting the summed per-window CPU and GC-pause deltas into intensities: cores
+// consumed (cpu_ns / window_ns) and STW GC-pause share of wall time. A
+// non-positive window yields zero intensities, and GC share is clamped to [0,1].
+// Byte gauges become float64 for the bytes formatter. Storage order (by instance)
+// is preserved.
+func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []resourceRow {
 	out := make([]resourceRow, 0, len(stats))
 	for _, s := range stats {
+		var cores, gcShare float64
+		if winSeconds > 0 {
+			winNs := winSeconds * 1e9
+			cores = float64(s.CPUNs) / winNs
+			gcShare = float64(s.GCPauseNs) / winNs
+			if gcShare > 1 {
+				gcShare = 1
+			}
+		}
 		out = append(out, resourceRow{
 			Instance:   s.Instance,
-			CPUSeconds: float64(s.CPUNs) / 1e9,
-			GCSeconds:  float64(s.GCPauseNs) / 1e9,
+			CoresUsed:  cores,
+			GCShare:    gcShare,
 			RSSBytes:   float64(s.RSSBytes),
 			HeapBytes:  float64(s.HeapAllocBytes),
 			Goroutines: s.Goroutines,

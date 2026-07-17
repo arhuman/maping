@@ -43,6 +43,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 	p := h.loadDetailPanels(r.Context(), tq, service, method, route, from, to, step)
 
 	dv := toDetailView(detail)
+	winSec := to.Sub(from).Seconds()
 	verdict := computeVerdict(dv, p.baseline)
 	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service, Href: withWin("/services/"+service, winKey)}, {Label: method + " " + route}}
 	h.render(w, "detail", detailData{
@@ -52,7 +53,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		Route:           route,
 		Detail:          dv,
 		Verdict:         verdict,
-		Stats:           detailStats(dv, to.Sub(from).Seconds()),
+		Stats:           detailStats(dv, winSec),
 		StatusBars:      statusBarsFor(dv),
 		Debug:           buildDebugContext(service, method, route, from, to, dv, dominantVersion(p.versions)),
 		Range:           buildDetailRange(service, method, route, winKey, from, to, time.Now().UTC(), custom),
@@ -65,7 +66,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		ErrorClasses:    toErrorClassRows(p.errorClasses),
 		NoStatusReasons: toNoStatusReasonRows(p.noStatusReasons),
 		Downstream:      toDownstreamView(p.downstream),
-		Resources:       toResourceRows(p.resources),
+		Resources:       toResourceRows(p.resources, winSec),
 	})
 }
 
