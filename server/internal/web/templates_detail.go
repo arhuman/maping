@@ -8,6 +8,11 @@ const tplDetailHTML = `
 <body><div class="app">{{template "sidebar" .Shell}}<main class="main">{{template "topbar" .Shell}}
 <div class="scrollbody"><div class="fade">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;"><span class="chip {{mcls .Method}}" style="font-size:12px;padding:5px 10px;border-radius:7px;">{{.Method}}</span><span style="font:600 18px var(--mono);">{{.Route}}</span></div>
+  <div class="panel" style="padding:13px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+    <span class="dot {{.Verdict.DotClass}}" style="flex-shrink:0;"></span>
+    <span style="font:700 14px var(--ui);flex-shrink:0;">{{.Verdict.Headline}}</span>
+    <span style="font:500 12.5px var(--mono);color:var(--txt-3);">{{.Verdict.Sentence}}</span>
+  </div>
   <div class="kpistrip" style="grid-template-columns:repeat(5,1fr);">{{range .Stats}}{{template "kpi" .}}{{end}}</div>
   <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start;">
     <div class="panel" style="padding:18px 20px;">
@@ -46,7 +51,7 @@ const tplDetailHTML = `
       {{end}}
     </div>
   </div>
-  <details class="diag">
+  <details class="diag"{{if .Verdict.Open}} open{{end}}>
   <summary>Diagnostic details</summary>
   <div class="panel" style="padding:13px 16px;margin-top:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
     <span style="font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;flex-shrink:0;">DEBUG CONTEXT</span>

@@ -62,6 +62,7 @@ type detailData struct {
 	Method          string
 	Route           string
 	Detail          detailView
+	Verdict         verdictView
 	Stats           []kpi
 	StatusBars      []statusBar
 	Debug           debugContext

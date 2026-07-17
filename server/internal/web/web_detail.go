@@ -43,6 +43,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 	p := h.loadDetailPanels(r.Context(), tq, service, method, route, from, to, step)
 
 	dv := toDetailView(detail)
+	verdict := computeVerdict(dv, p.baseline)
 	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service, Href: withWin("/services/"+service, winKey)}, {Label: method + " " + route}}
 	h.render(w, "detail", detailData{
 		Shell:           h.buildShell(r, "overview", crumbs, method+" "+route, true, winKey),
@@ -50,6 +51,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		Method:          method,
 		Route:           route,
 		Detail:          dv,
+		Verdict:         verdict,
 		Stats:           detailStats(dv, to.Sub(from).Seconds()),
 		StatusBars:      statusBarsFor(dv),
 		Debug:           buildDebugContext(service, method, route, from, to, dv, dominantVersion(p.versions)),
@@ -71,6 +73,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 // concurrently by loadDetailPanels.
 type detailPanels struct {
 	points          []storage.TimePoint
+	baseline        []storage.TimePoint
 	instances       []storage.InstanceStat
 	versions        []storage.VersionStat
 	exemplars       []storage.ExemplarRow
@@ -96,6 +99,17 @@ func (h *Handler) loadDetailPanels(ctx context.Context, tq ScopedQuery, service,
 	run(func() {
 		p.points = softQuery(ctx, h, "series", func(ctx context.Context) ([]storage.TimePoint, error) {
 			return tq.SeriesOverTime(ctx, service, method, route, from, to, step)
+		})
+	})
+	run(func() {
+		// Verdict baseline: a lagged trailing window (5m lag so the current incident
+		// cannot poison its own baseline) reconstructed at 1m resolution. Reuses the
+		// existing SeriesOverTime query — no new storage query. On failure it is nil
+		// and the latency-vs-baseline rule is skipped (verdict degrades gracefully).
+		baseTo := to.Add(-5 * time.Minute)
+		baseFrom := baseTo.Add(-6 * time.Hour)
+		p.baseline = softQuery(ctx, h, "baseline-series", func(ctx context.Context) ([]storage.TimePoint, error) {
+			return tq.SeriesOverTime(ctx, service, method, route, baseFrom, baseTo, time.Minute)
 		})
 	})
 	run(func() {

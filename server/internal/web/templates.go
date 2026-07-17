@@ -86,6 +86,7 @@ a{color:inherit;text-decoration:none;}
 .dot-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(95,227,161,.15);}
 .dot-warn{background:var(--warn);box-shadow:0 0 0 3px rgba(245,196,81,.15);}
 .dot-err{background:var(--err);box-shadow:0 0 0 3px rgba(255,107,107,.15);}
+.dot-muted{background:var(--txt-3);}
 /* status-breakdown bars */
 .bar-ok{background:var(--ok);} .bar-blue{background:var(--blue);} .bar-warn{background:var(--warn);}
 .bar-err{background:var(--err);} .bar-txt3{background:var(--txt-3);}
