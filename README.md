@@ -110,7 +110,7 @@ r.Use(mapinggin.MiddlewareWithRecorder(rec)) // above gin.Recovery()
 export MAPING_KEY=your-ingest-key   # the only required input; absent = no-op
 ```
 
-**Full details:** [`client/README.md`](client/README.md) — [`server/README.md`](server/README.md) — [`proto/`](proto/)
+**Full details:** [`client/README.md`](client/README.md) — [`server/README.md`](server/README.md) — [`proto/README.md`](proto/README.md)
 
 ---
 
