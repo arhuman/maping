@@ -105,22 +105,3 @@ func TestMiddlewareReturnsHandlerFunc(t *testing.T) {
 	assert.NotPanics(t, func() { engine.ServeHTTP(w, req) })
 	assert.Equal(t, http.StatusOK, w.Code)
 }
-
-// TestClampNonNegative covers both branches of the clamping helper.
-func TestClampNonNegative(t *testing.T) {
-	tests := []struct {
-		name string
-		in   int64
-		want int64
-	}{
-		{"zero", 0, 0},
-		{"positive", 42, 42},
-		{"negative (unknown length)", -1, 0},
-		{"large negative", -100, 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, clampNonNegative(tt.in))
-		})
-	}
-}

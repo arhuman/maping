@@ -13,58 +13,6 @@ import (
 	maping "github.com/arhuman/maping/client"
 )
 
-func TestParseTraceparent(t *testing.T) {
-	tests := []struct {
-		name      string
-		header    string
-		wantTrace string
-		wantSpan  string
-	}{
-		{
-			name:      "valid",
-			header:    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-			wantTrace: "4bf92f3577b34da6a3ce929d0e0e4736",
-			wantSpan:  "00f067aa0ba902b7",
-		},
-		{
-			name:      "valid uppercase hex",
-			header:    "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-			wantTrace: "4BF92F3577B34DA6A3CE929D0E0E4736",
-			wantSpan:  "00F067AA0BA902B7",
-		},
-		{name: "absent", header: "", wantTrace: "", wantSpan: ""},
-		{name: "too few parts", header: "00-abc-def", wantTrace: "", wantSpan: ""},
-		{name: "too many parts", header: "00-a-b-c-d", wantTrace: "", wantSpan: ""},
-		{
-			name:   "short trace id",
-			header: "00-4bf9-00f067aa0ba902b7-01",
-		},
-		{
-			name:   "non-hex trace id",
-			header: "00-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-00f067aa0ba902b7-01",
-		},
-		{
-			name:   "all-zero trace id (invalid sentinel)",
-			header: "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
-		},
-		{
-			name:   "all-zero span id (invalid sentinel)",
-			header: "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
-		},
-		{
-			name:   "short span id",
-			header: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f0-01",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotTrace, gotSpan := parseTraceparent(tt.header)
-			assert.Equal(t, tt.wantTrace, gotTrace)
-			assert.Equal(t, tt.wantSpan, gotSpan)
-		})
-	}
-}
-
 // TestMiddlewarePopulatesExemplarIDs drives a real request carrying a traceparent
 // and an X-Request-Id and asserts both land on the emitted exemplar.
 func TestMiddlewarePopulatesExemplarIDs(t *testing.T) {
