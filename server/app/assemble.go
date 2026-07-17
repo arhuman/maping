@@ -122,5 +122,23 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	bgCtx, cancelBg := context.WithCancel(context.Background())
 	startBackgroundJobs(bgCtx, o.jobs, d.pool, log)
 
-	return mux, ready, cancelBg, nil
+	// Wrap the whole mux so the hardening headers apply to every route (dashboard,
+	// auth, ingest, healthz), not just the HTML render path that sets the CSP.
+	return securityHeaders(mux, secureFromBaseURL(d.baseURL)), ready, cancelBg, nil
+}
+
+// securityHeaders wraps h to set response-hardening headers on every route:
+// X-Content-Type-Options: nosniff always (defeat MIME sniffing), and
+// Strict-Transport-Security only for an https deployment (secure), matching the
+// Secure session-cookie gate. HSTS over plain-http dev would be ignored by
+// browsers anyway; gating it keeps dev/prod behavior explicit and avoids pinning
+// localhost to https.
+func securityHeaders(h http.Handler, secure bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if secure {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		h.ServeHTTP(w, r)
+	})
 }

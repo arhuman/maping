@@ -202,6 +202,45 @@ func TestAssembleMuxAuthGating(t *testing.T) {
 	assert.Contains(t, loc, "/login")
 }
 
+// headersOf serves h and returns the response headers for a GET of path.
+func headersOf(t *testing.T, h http.Handler, path string) http.Header {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + path) //nolint:noctx // test-only helper, no request context needed.
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.Header
+}
+
+// TestAssembleMuxSecurityHeaders asserts the hardening headers apply to every
+// route: nosniff always, and HSTS only for an https deployment (matching the
+// Secure-cookie gate).
+func TestAssembleMuxSecurityHeaders(t *testing.T) {
+	// Insecure (http base URL): nosniff always, no HSTS.
+	insecure, _, cancel1, err := assembleMux(builtDeps{
+		querier: nopQuerier{}, ingestHandler: newIngestHandler(t),
+		constTenant: "dev-tenant", baseURL: "http://localhost:8080",
+	}, options{}, testLogger())
+	require.NoError(t, err)
+	defer cancel1()
+	h1 := headersOf(t, insecure, "/healthz")
+	assert.Equal(t, "nosniff", h1.Get("X-Content-Type-Options"))
+	assert.Empty(t, h1.Get("Strict-Transport-Security"))
+
+	// Secure (https base URL): HSTS present, on the same route.
+	secure, _, cancel2, err := assembleMux(builtDeps{
+		querier: nopQuerier{}, ingestHandler: newIngestHandler(t),
+		constTenant: "dev-tenant", baseURL: "https://maping.example.com",
+	}, options{}, testLogger())
+	require.NoError(t, err)
+	defer cancel2()
+	h2 := headersOf(t, secure, "/healthz")
+	assert.Equal(t, "nosniff", h2.Get("X-Content-Type-Options"))
+	assert.Contains(t, h2.Get("Strict-Transport-Security"), "max-age=")
+}
+
 // TestResolveControlPlaneDevMode asserts that with no store the derived
 // collaborators are all zero/nil (the static dev path), no error.
 func TestResolveControlPlaneDevMode(t *testing.T) {
