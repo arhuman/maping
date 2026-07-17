@@ -31,12 +31,12 @@ endif
 # The repo is a Go workspace (go.work). Every publishable module is listed here
 # so test/audit/tidy/checklen iterate over all of them. example/ is intentionally
 # excluded (demo code, not a distributed library).
-MODULES := proto client client/gin client/nethttp server
+MODULES := proto client client/gin client/nethttp client/echo server
 
 # Modules published to proxy.golang.org, in dependency (release) order: a module
 # is only tagged after everything it imports is already tagged. Used by `make
 # release`. example/ is not published.
-RELEASE_MODULES := proto client server client/gin client/nethttp
+RELEASE_MODULES := proto client server client/gin client/nethttp client/echo
 
 # Release version for `make release VERSION=vX.Y.Z` (path-prefixed tags per module).
 VERSION ?=
