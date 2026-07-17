@@ -1,10 +1,13 @@
 package web
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/arhuman/maping/server/internal/storage"
 )
@@ -27,23 +30,85 @@ func TestOverviewLiveMetaByQuery(t *testing.T) {
 }
 
 func TestOnboardingMetaRefreshWhileIncomplete(t *testing.T) {
-	// No data -> the onboarding panel self-refreshes to advance the handshake.
+	// No data -> the onboarding panel advances the handshake via the in-place
+	// poller (no full-document flicker); the meta-refresh survives only inside a
+	// <noscript> fallback for no-JS clients.
 	srv := newServer(t, Config{Querier: fakeQuerier{hasData: false}, Tenant: constTenant})
 	_, body := getBody(t, srv.URL+"/")
-	assert.Contains(t, body, `http-equiv="refresh"`)
-	assert.Contains(t, body, `content="3"`)
+	assert.Contains(t, body, `<noscript><meta http-equiv="refresh" content="10"></noscript>`)
+	// The refresh meta must NOT be emitted outside <noscript> (the source of the flicker).
+	assert.NotContains(t, body, `<head><meta http-equiv="refresh"`)
+	// JS clients poll the fragment in place: the container + poller script are present.
+	assert.Contains(t, body, `id="handshake"`)
+	assert.Contains(t, body, `data-complete="false"`)
+	assert.Contains(t, body, `src="/assets/handshake.js"`)
 }
 
 func TestSetupMetaRefreshGatedOnData(t *testing.T) {
-	// Incomplete onboarding -> Setup refreshes to advance the stepper.
+	// Incomplete onboarding -> Setup keeps the <noscript> fallback and the poller.
 	inc := newServer(t, Config{Querier: fakeQuerier{hasData: false}, Tenant: constTenant})
 	_, body := getBody(t, inc.URL+"/setup")
-	assert.Contains(t, body, `content="3"`)
+	assert.Contains(t, body, `<noscript><meta http-equiv="refresh" content="10"></noscript>`)
+	assert.Contains(t, body, `data-complete="false"`)
+	assert.Contains(t, body, `src="/assets/handshake.js"`)
 
-	// Once data exists, Setup is a static management page (no refresh loop).
+	// Once data exists, Setup is a static management page: no refresh fallback, and
+	// the poller short-circuits because the container is already complete.
 	done := newServer(t, Config{Querier: fakeQuerier{hasData: true}, Tenant: constTenant})
 	_, body2 := getBody(t, done.URL+"/setup")
 	assert.NotContains(t, body2, `http-equiv="refresh"`)
+	assert.Contains(t, body2, `data-complete="true"`)
+}
+
+func TestHandshakeFragmentReflectsData(t *testing.T) {
+	// Incomplete -> fragment renders the stepper and signals not-complete so the
+	// client keeps polling.
+	inc := newServer(t, Config{Querier: fakeQuerier{hasData: false}, Tenant: constTenant})
+	resp, err := http.Get(inc.URL + "/setup/handshake")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "false", resp.Header.Get("X-Handshake-Complete"))
+	body := string(b)
+	assert.Contains(t, body, "HANDSHAKE")
+	assert.Contains(t, body, "Ingest key valid")
+	// The fragment is ONLY the stepper — no full document chrome.
+	assert.NotContains(t, body, "<html")
+	assert.NotContains(t, body, `id="handshake"`)
+
+	// Complete -> fragment signals done so the client stops polling.
+	done := newServer(t, Config{Querier: fakeQuerier{hasData: true}, Tenant: constTenant})
+	resp2, err := http.Get(done.URL + "/setup/handshake")
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+	assert.Equal(t, "true", resp2.Header.Get("X-Handshake-Complete"))
+}
+
+func TestHandshakeFragmentShowsConnectedSources(t *testing.T) {
+	src := func(context.Context, string) ([]ServiceOnboarding, error) {
+		return []ServiceOnboarding{{Service: "checkout-api", Instance: "pod-7"}}, nil
+	}
+	srv := newServer(t, Config{Querier: fakeQuerier{hasData: false}, Tenant: constTenant, Onboarding: src})
+	_, body := getBody(t, srv.URL+"/setup/handshake")
+	assert.Contains(t, body, "CONNECTED")
+	assert.Contains(t, body, "checkout-api")
+	assert.Contains(t, body, "pod-7")
+}
+
+func TestHandshakeJSAssetServed(t *testing.T) {
+	srv := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant})
+	resp, err := http.Get(srv.URL + "/assets/handshake.js")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "text/javascript; charset=utf-8", resp.Header.Get("Content-Type"))
+	assert.Contains(t, string(b), "/setup/handshake")
+	assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src 'self'")
 }
 
 func TestOverviewTriageSortForUnhealthy(t *testing.T) {

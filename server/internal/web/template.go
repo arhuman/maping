@@ -78,14 +78,24 @@ type detailData struct {
 	Resources       []resourceRow
 }
 
+// handshakeView feeds the live handshake stepper partial ("handshake-stepper"),
+// shared by the get-started page, the Setup page, and the /setup/handshake polling
+// fragment. Complete is true once the first Summary is ingested (HasAnySummary),
+// which is the signal that stops the client polling.
+type handshakeView struct {
+	Steps     []onbStepView
+	Connected []ServiceOnboarding
+	Frozen    bool
+	Complete  bool
+}
+
 // onboardingPage feeds the onboarding page: the live handshake stepper, the
 // connected sources, and the frozen warning.
 type onboardingPage struct {
 	Shell     Shell
-	Steps     []onbStepView
-	Connected []ServiceOnboarding
+	Handshake handshakeView
 	Frozen    bool
-	Refresh   bool // emit the 3s handshake meta-refresh (onboarding incomplete)
+	Refresh   bool // gate the <noscript> meta-refresh fallback (onboarding incomplete)
 }
 
 // performancePage feeds the performance/architecture page. The volume figures
@@ -125,14 +135,13 @@ type performancePage struct {
 // create; CSRFToken signs the create/revoke forms.
 type setupPage struct {
 	Shell     Shell
-	Steps     []onbStepView
-	Connected []ServiceOnboarding
+	Handshake handshakeView
 	Frozen    bool
 	ShowKeys  bool // false when no control plane: the keys panel is hidden.
 	Keys      []keyRow
 	NewToken  string // non-empty only on the create POST response (reveal once).
 	CSRFToken string
-	Refresh   bool // emit the 3s handshake meta-refresh (onboarding incomplete)
+	Refresh   bool // gate the <noscript> meta-refresh fallback (onboarding incomplete)
 
 	// Team panel (members + invites). ShowTeam is false when no control plane.
 	ShowTeam  bool

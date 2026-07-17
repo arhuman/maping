@@ -3,8 +3,10 @@
 // panel driven by the handshake. It is server-rendered HTML (html/template
 // autoescaping) with no client-side JavaScript framework: a strict script-src 'self'
 // CSP (ADR-0008) rules out CDN scripts, so the time-series and latency histogram charts
-// are inline server-rendered SVG (see chart.go). The only script served is a self-hosted
-// assets/copy.js. The /api/series and /api/histogram JSON endpoints remain in the code
+// are inline server-rendered SVG (see chart.go). The only scripts served are self-hosted
+// assets/copy.js (copy-to-clipboard) and assets/handshake.js (in-place polling of the
+// onboarding stepper via GET /setup/handshake, replacing the old full-page meta-refresh).
+// The /api/series and /api/histogram JSON endpoints remain in the code
 // but are not consumed by the current UI.
 //
 // The three levels are:
@@ -130,6 +132,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /dashboard", h.serveOverview)
 	mux.HandleFunc("GET /performance", h.servePerformance)
 	mux.HandleFunc("GET /setup", h.serveSetup)
+	mux.HandleFunc("GET /setup/handshake", h.serveHandshakeFragment)
 	mux.HandleFunc("POST /setup/keys", h.serveCreateKey)
 	mux.HandleFunc("POST /setup/keys/{id}/revoke", h.serveRevokeKey)
 	mux.HandleFunc("POST /setup/invites", h.serveCreateInvite)
@@ -142,7 +145,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/histogram", h.serveHistogram)
 	mux.HandleFunc("GET /api/instances", h.serveInstances)
 
-	mux.HandleFunc("GET /assets/copy.js", h.serveCopyJS)
+	mux.HandleFunc("GET /assets/copy.js", h.serveJS("copy.js", copyJS))
+	mux.HandleFunc("GET /assets/handshake.js", h.serveJS("handshake.js", handshakeJS))
 }
 
 // buildShell assembles the per-request chrome (sidebar identity + nav, top-bar
@@ -313,26 +317,15 @@ func (h *Handler) serveEndpoints(w http.ResponseWriter, r *http.Request) {
 // renderOnboarding builds and renders the 4-step onboarding panel from the live
 // handshake/summary state, plus the frozen-cardinality warning.
 func (h *Handler) renderOnboarding(w http.ResponseWriter, r *http.Request, tid tenant.ID, winKey string) {
-	var connected []ServiceOnboarding
-	if h.onboarding != nil {
-		got, err := h.onboarding(r.Context(), tid.String())
-		if err != nil {
-			// Onboarding is best-effort UI: log and fall back to "no source
-			// connected yet" rather than 500 the whole page.
-			h.log.Error("web: onboarding source", slog.Any("err", err))
-		} else {
-			connected = got
-		}
-	}
-	ob := buildOnboarding(connected, h.frozenFor(tid))
+	hv := h.buildHandshakeView(r, tid)
 	h.render(w, "onboarding", onboardingPage{
 		Shell:     h.buildShell(r, "setup", []crumb{{Label: "setup"}}, "Get started", false, winKey),
-		Steps:     onboardingStepViews(ob.Steps),
-		Connected: ob.Connected,
-		Frozen:    ob.Frozen,
+		Handshake: hv,
+		Frozen:    hv.Frozen,
 		// This panel is reached only while the tenant has no summary yet, so it is
-		// always incomplete: refresh so it self-terminates onto the live overview
-		// the moment the first Summary lands.
+		// always incomplete: keep the <noscript> meta-refresh fallback so no-JS
+		// clients self-terminate onto the live overview the moment the first Summary
+		// lands. JS clients poll the fragment in place and reload on completion.
 		Refresh: true,
 	})
 }

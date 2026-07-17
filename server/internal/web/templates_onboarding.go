@@ -3,8 +3,31 @@ package web
 // tplOnboardingHTML holds the onboarding (get-started) page and the Setup keys
 // page, which share the handshake timeline partial markup.
 const tplOnboardingHTML = `
+{{define "handshake-stepper"}}<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font:700 11px var(--mono);color:var(--txt-3);letter-spacing:1px;">HANDSHAKE</span></div>
+<div style="font-size:12px;color:var(--txt-3);margin-bottom:18px;">Live status from your first recorder.</div>
+<div style="display:flex;flex-direction:column;gap:2px;">
+  {{range .Steps}}
+  <div style="display:flex;align-items:flex-start;gap:13px;padding:11px 4px;">
+    <div style="display:flex;flex-direction:column;align-items:center;">
+      <div style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--mono);
+        {{if eq .DotClass "dot-done"}}background:var(--accent);border:1.5px solid var(--accent);color:#0A0C0F;
+        {{else if eq .DotClass "dot-current"}}background:rgba(180,241,74,.12);border:1.5px solid var(--accent);color:var(--accent);
+        {{else}}background:var(--panel-3);border:1.5px solid var(--line);color:var(--txt-3);{{end}}">{{.Icon}}</div>
+      {{if .Connector}}<div style="width:1.5px;height:22px;background:var(--line);margin-top:2px;"></div>{{end}}
+    </div>
+    <div style="padding-top:1px;"><div style="font-size:13px;font-weight:600;" class="{{.LabelClass}}">{{.Label}}</div><div style="font:500 11px var(--mono);color:var(--txt-3);margin-top:2px;">{{.Sub}}</div></div>
+  </div>
+  {{end}}
+</div>
+{{if .Connected}}
+<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+  <div style="font:600 10px var(--mono);color:var(--txt-3);letter-spacing:.8px;margin-bottom:8px;">CONNECTED</div>
+  {{range .Connected}}<div style="font:500 11px var(--mono);color:var(--txt-2);margin-bottom:4px;">{{.Service}}{{if .Instance}} · {{.Instance}}{{end}}</div>{{end}}
+</div>
+{{end}}{{end}}
+
 {{define "onboarding"}}<!doctype html>
-<html lang="en"><head>{{template "head"}}{{if .Refresh}}<meta http-equiv="refresh" content="3">{{end}}<title>mAPI-ng — get started</title></head>
+<html lang="en"><head>{{template "head"}}{{if .Refresh}}<noscript><meta http-equiv="refresh" content="10"></noscript>{{end}}<title>mAPI-ng — get started</title></head>
 <body><div class="app">{{template "sidebar" .Shell}}<main class="main">{{template "topbar" .Shell}}
 <div class="scrollbody"><div style="max-width:1060px;margin:0 auto;" class="fade">
   {{if .Frozen}}<div class="warnbar"><span style="font-size:15px;">⚠</span><span class="c-txt2"><b class="c-warn">Cardinality frozen.</b> New series are rejected for this tenant.</span></div>{{end}}
@@ -28,35 +51,16 @@ r.Use(gin.Recovery())</pre>
       <div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--txt-3);padding:2px 4px;"><span class="c-txt2">◇</span> Absent key ⇒ the middleware is a no-op. Shipping mAPI-ng is always safe.</div>
     </div>
     <div class="panel" style="padding:20px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font:700 11px var(--mono);color:var(--txt-3);letter-spacing:1px;">HANDSHAKE</span></div>
-      <div style="font-size:12px;color:var(--txt-3);margin-bottom:18px;">Live status from your first recorder.</div>
-      <div style="display:flex;flex-direction:column;gap:2px;">
-        {{range .Steps}}
-        <div style="display:flex;align-items:flex-start;gap:13px;padding:11px 4px;">
-          <div style="display:flex;flex-direction:column;align-items:center;">
-            <div style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--mono);
-              {{if eq .DotClass "dot-done"}}background:var(--accent);border:1.5px solid var(--accent);color:#0A0C0F;
-              {{else if eq .DotClass "dot-current"}}background:rgba(180,241,74,.12);border:1.5px solid var(--accent);color:var(--accent);
-              {{else}}background:var(--panel-3);border:1.5px solid var(--line);color:var(--txt-3);{{end}}">{{.Icon}}</div>
-            {{if .Connector}}<div style="width:1.5px;height:22px;background:var(--line);margin-top:2px;"></div>{{end}}
-          </div>
-          <div style="padding-top:1px;"><div style="font-size:13px;font-weight:600;" class="{{.LabelClass}}">{{.Label}}</div><div style="font:500 11px var(--mono);color:var(--txt-3);margin-top:2px;">{{.Sub}}</div></div>
-        </div>
-        {{end}}
-      </div>
-      {{if .Connected}}
-      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
-        <div style="font:600 10px var(--mono);color:var(--txt-3);letter-spacing:.8px;margin-bottom:8px;">CONNECTED</div>
-        {{range .Connected}}<div style="font:500 11px var(--mono);color:var(--txt-2);margin-bottom:4px;">{{.Service}}{{if .Instance}} · {{.Instance}}{{end}}</div>{{end}}
-      </div>
-      {{end}}
+      <div id="handshake" data-complete="{{if .Handshake.Complete}}true{{else}}false{{end}}">{{template "handshake-stepper" .Handshake}}</div>
     </div>
   </div>
 </div></div>
-</main></div></body></html>{{end}}
+</main></div>
+<script src="/assets/handshake.js" defer></script>
+</body></html>{{end}}
 
 {{define "setup"}}<!doctype html>
-<html lang="en"><head>{{template "head"}}{{if .Refresh}}<meta http-equiv="refresh" content="3">{{end}}<title>mAPI-ng — setup</title></head>
+<html lang="en"><head>{{template "head"}}{{if .Refresh}}<noscript><meta http-equiv="refresh" content="10"></noscript>{{end}}<title>mAPI-ng — setup</title></head>
 <body><div class="app">{{template "sidebar" .Shell}}<main class="main">{{template "topbar" .Shell}}
 <div class="scrollbody"><div style="max-width:1060px;margin:0 auto;" class="fade">
   {{if .Frozen}}<div class="warnbar"><span style="font-size:15px;">⚠</span><span class="c-txt2"><b class="c-warn">Cardinality frozen.</b> New series are rejected for this tenant.</span></div>{{end}}
@@ -96,28 +100,7 @@ r.Use(gin.Recovery())</pre>
       {{end}}
     </div>
     <div class="panel" style="padding:20px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font:700 11px var(--mono);color:var(--txt-3);letter-spacing:1px;">HANDSHAKE</span></div>
-      <div style="font-size:12px;color:var(--txt-3);margin-bottom:18px;">Live status from your first recorder.</div>
-      <div style="display:flex;flex-direction:column;gap:2px;">
-        {{range .Steps}}
-        <div style="display:flex;align-items:flex-start;gap:13px;padding:11px 4px;">
-          <div style="display:flex;flex-direction:column;align-items:center;">
-            <div style="width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px var(--mono);
-              {{if eq .DotClass "dot-done"}}background:var(--accent);border:1.5px solid var(--accent);color:#0A0C0F;
-              {{else if eq .DotClass "dot-current"}}background:rgba(180,241,74,.12);border:1.5px solid var(--accent);color:var(--accent);
-              {{else}}background:var(--panel-3);border:1.5px solid var(--line);color:var(--txt-3);{{end}}">{{.Icon}}</div>
-            {{if .Connector}}<div style="width:1.5px;height:22px;background:var(--line);margin-top:2px;"></div>{{end}}
-          </div>
-          <div style="padding-top:1px;"><div style="font-size:13px;font-weight:600;" class="{{.LabelClass}}">{{.Label}}</div><div style="font:500 11px var(--mono);color:var(--txt-3);margin-top:2px;">{{.Sub}}</div></div>
-        </div>
-        {{end}}
-      </div>
-      {{if .Connected}}
-      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
-        <div style="font:600 10px var(--mono);color:var(--txt-3);letter-spacing:.8px;margin-bottom:8px;">CONNECTED</div>
-        {{range .Connected}}<div style="font:500 11px var(--mono);color:var(--txt-2);margin-bottom:4px;">{{.Service}}{{if .Instance}} · {{.Instance}}{{end}}</div>{{end}}
-      </div>
-      {{end}}
+      <div id="handshake" data-complete="{{if .Handshake.Complete}}true{{else}}false{{end}}">{{template "handshake-stepper" .Handshake}}</div>
     </div>
   </div>
   {{if .ShowTeam}}
@@ -167,5 +150,6 @@ r.Use(gin.Recovery())</pre>
 </div></div>
 </main></div>
 <script src="/assets/copy.js" defer></script>
+<script src="/assets/handshake.js" defer></script>
 </body></html>{{end}}
 `

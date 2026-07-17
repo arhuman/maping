@@ -46,10 +46,13 @@ func (h *Handler) isAdmin(r *http.Request) bool {
 	return ok && role == "admin"
 }
 
-// renderSetup builds the Setup page from the live handshake state plus the keys
-// and team panels. ex carries the reveal-once plaintext/link right after a create
-// POST; it is empty on a plain GET so a banner shows only once, by construction.
-func (h *Handler) renderSetup(w http.ResponseWriter, r *http.Request, tid tenant.ID, winKey string, ex setupExtras) {
+// buildHandshakeView assembles the live handshake stepper view — the 4 rendered
+// steps, the connected sources, the frozen flag, and the completion flag — shared
+// by the Setup page, the get-started page, and the /setup/handshake polling
+// fragment. Complete is true once the tenant has its first summary
+// (HasAnySummary); that is the signal that stops the client polling. A has-data
+// check failure defaults to incomplete rather than a false "done".
+func (h *Handler) buildHandshakeView(r *http.Request, tid tenant.ID) handshakeView {
 	var connected []ServiceOnboarding
 	if h.onboarding != nil {
 		got, err := h.onboarding(r.Context(), tid.String())
@@ -60,24 +63,57 @@ func (h *Handler) renderSetup(w http.ResponseWriter, r *http.Request, tid tenant
 		}
 	}
 	ob := buildOnboarding(connected, h.frozenFor(tid))
-
-	// While onboarding is incomplete (no summary yet), auto-refresh so the
-	// handshake stepper advances live; once data exists, stop refreshing. A
-	// has-data check failure defaults to no refresh rather than a hammering loop.
-	refresh := false
+	complete := false
 	if hasData, err := h.q.Tenant(tid).HasAnySummary(r.Context()); err != nil {
-		h.log.Error("web: setup has-data", slog.Any("err", err))
+		h.log.Error("web: handshake has-data", slog.Any("err", err))
 	} else {
-		refresh = !hasData
+		complete = hasData
 	}
-
-	page := setupPage{
-		Shell:     h.buildShell(r, "setup", []crumb{{Label: "setup"}}, "Setup", false, winKey),
+	return handshakeView{
 		Steps:     onboardingStepViews(ob.Steps),
 		Connected: ob.Connected,
 		Frozen:    ob.Frozen,
+		Complete:  complete,
+	}
+}
+
+// serveHandshakeFragment renders ONLY the live handshake stepper for in-place
+// polling by assets/handshake.js — no full-page reload, so the dark theme no
+// longer flickers every 3s. It reuses the same build path as the Setup and
+// get-started pages and signals completion (first summary ingested) via the
+// X-Handshake-Complete header, which is what stops the client polling.
+func (h *Handler) serveHandshakeFragment(w http.ResponseWriter, r *http.Request) {
+	tid, ok := h.resolveTenant(w, r)
+	if !ok {
+		return
+	}
+	hv := h.buildHandshakeView(r, tid)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	if hv.Complete {
+		w.Header().Set("X-Handshake-Complete", "true")
+	} else {
+		w.Header().Set("X-Handshake-Complete", "false")
+	}
+	if err := h.tpl.ExecuteTemplate(w, "handshake-stepper", hv); err != nil {
+		h.log.Error("web: render handshake-stepper", slog.Any("err", err))
+	}
+}
+
+// renderSetup builds the Setup page from the live handshake state plus the keys
+// and team panels. ex carries the reveal-once plaintext/link right after a create
+// POST; it is empty on a plain GET so a banner shows only once, by construction.
+func (h *Handler) renderSetup(w http.ResponseWriter, r *http.Request, tid tenant.ID, winKey string, ex setupExtras) {
+	hv := h.buildHandshakeView(r, tid)
+	page := setupPage{
+		Shell:     h.buildShell(r, "setup", []crumb{{Label: "setup"}}, "Setup", false, winKey),
+		Handshake: hv,
+		Frozen:    hv.Frozen,
 		NewToken:  ex.newToken,
-		Refresh:   refresh,
+		// While onboarding is incomplete (no summary yet), keep the <noscript>
+		// meta-refresh fallback so no-JS clients still advance the stepper; JS
+		// clients ignore it and poll the fragment in place instead.
+		Refresh: !hv.Complete,
 	}
 	if h.keys != nil {
 		h.populateKeys(r, tid, &page)
