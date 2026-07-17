@@ -17,9 +17,11 @@ import (
 // strings never reach it — so it is safe to emit unescaped. Colors are concrete
 // hex, not CSS var(), since SVG presentation attributes do not resolve var().
 
-// timeSeriesSVG draws rate (accent, left axis) and p95 (violet, right axis in
-// ms) over time, matching the design's two-line chart. Fewer than two points
-// cannot form a line, so it renders an empty frame instead.
+// timeSeriesSVG draws the synchronized traffic/errors/latency timeline: rate
+// (accent, left axis), errors/sec (red, sharing the left axis since errors are a
+// subset of requests) as a filled band, and p95 (violet, right axis in ms). One
+// chart answers "is it up, is it erroring, is it slow" at a glance. Fewer than two
+// points cannot form a line, so it renders an empty frame instead.
 func timeSeriesSVG(points []storage.TimePoint, step time.Duration) template.HTML {
 	const (
 		w, hgt         = 560.0, 250.0
@@ -34,10 +36,14 @@ func timeSeriesSVG(points []storage.TimePoint, step time.Duration) template.HTML
 	}
 	n := len(points)
 	rate := make([]float64, n)
+	errPS := make([]float64, n)
 	p95 := make([]float64, n)
 	var rMax, pMax float64
 	for i, p := range points {
 		rate[i] = float64(p.Count) / stepSec
+		// errors/sec share the rate (left) axis: errors are a subset of requests,
+		// so errPS <= rate <= rMax and no separate scale is needed.
+		errPS[i] = float64(p.Count) * p.ErrorRate / stepSec
 		p95[i] = p.P95
 		if rate[i] > rMax {
 			rMax = rate[i]
@@ -60,7 +66,7 @@ func timeSeriesSVG(points []storage.TimePoint, step time.Duration) template.HTML
 
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg viewBox="0 0 %g %g" width="100%%" style="display:block;height:auto">`, w, hgt)
-	b.WriteString(`<defs><linearGradient id="ts" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B4F14A" stop-opacity="0.22"></stop><stop offset="100%" stop-color="#B4F14A" stop-opacity="0"></stop></linearGradient></defs>`)
+	b.WriteString(`<defs><linearGradient id="ts" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B4F14A" stop-opacity="0.22"></stop><stop offset="100%" stop-color="#B4F14A" stop-opacity="0"></stop></linearGradient><linearGradient id="tse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FF6B6B" stop-opacity="0.30"></stop><stop offset="100%" stop-color="#FF6B6B" stop-opacity="0"></stop></linearGradient></defs>`)
 	for g := 0; g <= 3; g++ {
 		y := pT + float64(g)*(hgt-pT-pB)/3
 		fmt.Fprintf(&b, `<line x1="%g" y1="%.1f" x2="%.1f" y2="%.1f" stroke="rgba(255,255,255,.055)" stroke-width="1"></line>`, pL, y, w-pR, y)
@@ -68,8 +74,11 @@ func timeSeriesSVG(points []storage.TimePoint, step time.Duration) template.HTML
 		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" text-anchor="start" fill="#A78BFA" style="font:500 9px var(--mono)">%.0f</text>`, w-pR+8, y+3, pMax*(1-float64(g)/3)*1000)
 	}
 	rLine := svgPath(x, yr, rate)
+	eLine := svgPath(x, yr, errPS)
 	fmt.Fprintf(&b, `<path d="%s L%.1f,%.1f L%.1f,%.1f Z" fill="url(#ts)"></path>`, rLine, x(n-1), hgt-pB, pL, hgt-pB)
+	fmt.Fprintf(&b, `<path d="%s L%.1f,%.1f L%.1f,%.1f Z" fill="url(#tse)"></path>`, eLine, x(n-1), hgt-pB, pL, hgt-pB)
 	fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="#B4F14A" stroke-width="2" stroke-linejoin="round"></path>`, rLine)
+	fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="#FF6B6B" stroke-width="2" stroke-linejoin="round"></path>`, eLine)
 	fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="#A78BFA" stroke-width="2" stroke-linejoin="round"></path>`, svgPath(x, yp, p95))
 	b.WriteString(`</svg>`)
 	return template.HTML(b.String())
