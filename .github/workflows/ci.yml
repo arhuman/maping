@@ -88,6 +88,27 @@ jobs:
           done
           exit $fail
 
+  # Public-tree gate: the open-core tree must not name the composing build's
+  # hosted-service surfaces (payment/plan-commerce vocabulary scrubbed in the
+  # public split). This grep catches a re-introduction in CI instead of leaving
+  # it for review — the code-absence invariant (ADR-0004). It scans tracked
+  # source/docs, skipping generated protobuf/connect stubs and the workflow file
+  # itself (which necessarily spells the forbidden terms in the pattern below).
+  public-tree:
+    name: public tree hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No hosted-service vocabulary in the public tree
+        run: |
+          set -euo pipefail
+          pattern='stripe|billing|pricing|subscription|org_billing|member_invites|checkout_session'
+          if git grep -nEi "$pattern" -- '*.go' '*.md' '*.sql' '*.yml' '*.yaml' '*.proto' ':!*.pb.go' ':!*.connect.go' ':!.github/'; then
+            echo "::error::hosted-service vocabulary found in the public (open-core) tree — see matches above"
+            exit 1
+          fi
+          echo "public tree clean of hosted-service vocabulary"
+
   # Quality gate: the same `make audit` developers run locally (go mod verify +
   # golangci-lint with the repo's 10x thresholds + govulncheck, per module).
   # Tools are pre-installed at the pinned versions so `make audit` reuses them
