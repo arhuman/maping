@@ -27,8 +27,6 @@ import (
 	"github.com/arhuman/maping/server/internal/storage"
 	"github.com/arhuman/maping/server/internal/web"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/arhuman/maping/proto/maping/v1/mapingv1connect"
 	"github.com/arhuman/maping/proto/mapingcompress"
 )
@@ -50,11 +48,37 @@ const (
 	devOrgName   = "dev-org"
 )
 
-// Run boots the collector and blocks until a shutdown signal, then drains
+// App is the built composition root: the fully-assembled HTTP mux plus the
+// resources Serve runs and shutdown releases. build performs every wiring
+// decision (infra construction + assembleMux); Serve runs the listener until a
+// signal and drains gracefully. The split lets a test assert the wiring (via
+// assembleMux) with fakes, without binding a socket or a live ClickHouse.
+type App struct {
+	log        *slog.Logger
+	mux        http.Handler
+	writer     *storage.Writer
+	closeStore func()
+	ready      *atomic.Bool
+	cancelBg   context.CancelFunc
+	listen     string
+}
+
+// Run builds the collector and serves it until a shutdown signal, then drains
 // gracefully. It is the whole of what func main delegates to.
-//
-//nolint:gocyclo,funlen,gocognit // linear boot+shutdown sequence; the length and complexity are sequential err/nil guards, not branching logic.
 func Run(log *slog.Logger, opts ...Option) error {
+	app, err := build(log, opts...)
+	if err != nil {
+		return err
+	}
+	return app.Serve()
+}
+
+// build constructs the App: it opens the storage writer, applies the schema,
+// resolves the ingest wiring and control-plane-dependent collaborators, and hands
+// them to assembleMux to produce the routed handler. Every infra dependency
+// (ClickHouse, Postgres) is touched here; the routing decisions live in
+// assembleMux so they stay unit-testable with fakes.
+func build(log *slog.Logger, opts ...Option) (*App, error) {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
@@ -65,18 +89,18 @@ func Run(log *slog.Logger, opts ...Option) error {
 
 	writer, err := storage.NewWriter(startCtx, storage.ConfigFromEnv(), log)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Apply the ClickHouse schema at boot (idempotent DDL). Without this a fresh
 	// ClickHouse has no summaries table, so both ingest and the dashboard fail.
 	if err := writer.Migrate(startCtx, log); err != nil {
-		return err
+		return nil, err
 	}
 
 	wiring, err := buildIngestWiring(startCtx, log, o.limitProvider, o.migrations)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// closeStore releases the control-plane pool (no-op in static dev mode); it is
 	// called on every early-return below and once at shutdown.
@@ -98,93 +122,53 @@ func Run(log *slog.Logger, opts ...Option) error {
 	// store; assigning through the concrete non-nil check avoids a typed-nil
 	// interface that would defeat the nil checks downstream.
 	baseURL := os.Getenv("MAPING_BASE_URL")
-	var (
-		sessKey     []byte
-		memberStore auth.MemberStore
-		cp          controlPlane
-	)
-	if store != nil {
-		if sessKey, err = sessionKey(secureFromBaseURL(baseURL), log); err != nil {
-			closeStore()
-			return err
-		}
-		memberStore, cp = store, store
-	}
-
-	// The composed post-auth hook (invitation accept) and team-panel admin are
-	// built here, once the control-plane pool exists — their invite store needs it.
-	// Both stay nil without a control plane, so dev mode is plain login with no
-	// team panel.
-	var (
-		interceptor LoginInterceptor
-		memberAdmin MemberAdmin
-	)
-	if store != nil {
-		if o.loginInterceptor != nil {
-			interceptor = o.loginInterceptor(store.Pool())
-		}
-		if o.memberAdmin != nil {
-			memberAdmin = o.memberAdmin(store.Pool())
-		}
-	}
-
-	authLayer, err := buildAuth(memberStore, interceptor, baseURL, sessKey, log)
+	cpd, err := resolveControlPlane(store, o, baseURL, log)
 	if err != nil {
 		closeStore()
-		return err
+		return nil, err
 	}
 
-	querier := scopedQuerier{qs: writer.QueryService()}
-	webHandler, err := web.NewHandler(
-		buildWebConfig(querier, cp, memberAdmin, wiring.card, authLayer != nil, wiring.tenant, baseURL, sessKey, log))
+	mux, ready, cancelBg, err := assembleMux(builtDeps{
+		querier:       scopedQuerier{qs: writer.QueryService()},
+		ingestHandler: ingestHandler,
+		cp:            cpd.cp,
+		memberStore:   cpd.memberStore,
+		interceptor:   cpd.interceptor,
+		memberAdmin:   cpd.memberAdmin,
+		pool:          cpd.pool,
+		card:          wiring.card,
+		constTenant:   wiring.tenant,
+		baseURL:       baseURL,
+		sessKey:       cpd.sessKey,
+	}, o, log)
 	if err != nil {
 		closeStore()
-		return err
+		return nil, err
 	}
 
-	// readiness flips to false on shutdown so load balancers stop routing.
-	var ready atomic.Bool
-	ready.Store(true)
+	return &App{
+		log:        log,
+		mux:        mux,
+		writer:     writer,
+		closeStore: closeStore,
+		ready:      ready,
+		cancelBg:   cancelBg,
+		listen:     os.Getenv("MAPING_LISTEN"),
+	}, nil
+}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthHandler(&ready))
-	// The public landing page ("/" for anonymous visitors) is opt-in via
-	// WithPublicHome; a self-host/OSS deployment wires none, so anonymous "/"
-	// redirects to /login. A composing build supplies the landing page and
-	// registers any companion routes via WithRoutes.
-	mountDashboard(mux, webHandler, o.publicHome, authLayer, log)
-	mountIngest(mux, ingestHandler, maxBodyCeiling(log))
+// Serve runs the HTTP listener until SIGINT/SIGTERM, then drains gracefully:
+// mark not-ready, stop accepting, drain the ingest->ClickHouse batcher (final
+// flush with bounded retry) before releasing the control-plane pool so the last
+// buffered summaries are not lost on a deploy restart, and cancel background jobs.
+func (a *App) Serve() error {
+	defer a.cancelBg()
 
-	// Extension routes mount after the core surfaces so their patterns compose by
-	// ServeMux precedence. The pool is nil in static dev mode (no control plane).
-	// gate/sessionOrg give a registrar the dashboard auth middleware and the
-	// verified-org reader (both nil when auth is off), so a composing build mounts
-	// its own authenticated routes without importing the internal auth package.
-	var pool *pgxpool.Pool
-	if store != nil {
-		pool = store.Pool()
-	}
-	var (
-		gate       func(http.Handler) http.Handler
-		sessionOrg func(*http.Request) (string, bool)
-	)
-	if authLayer != nil {
-		gate = authLayer.Middleware
-		sessionOrg = auth.TenantFromContext
-	}
-	mountExtensions(mux, o.routes, pool, gate, sessionOrg, log)
-
-	// Background loops (extension jobs) share one context, cancelled on
-	// shutdown so every goroutine exits before the pool closes.
-	bgCtx, cancelBg := context.WithCancel(context.Background())
-	defer cancelBg()
-	startBackgroundJobs(bgCtx, o.jobs, pool, log)
-
-	srv := newHTTPServer(os.Getenv("MAPING_LISTEN"), mux)
+	srv := newHTTPServer(a.listen, a.mux)
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", slog.String("addr", srv.Addr))
+		a.log.Info("listening", slog.String("addr", srv.Addr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -197,25 +181,21 @@ func Run(log *slog.Logger, opts ...Option) error {
 	case err := <-errCh:
 		return err
 	case sig := <-sigCh:
-		log.Info("shutdown signal received", slog.String("signal", sig.String()))
+		a.log.Info("shutdown signal received", slog.String("signal", sig.String()))
 	}
 
-	// Graceful shutdown: mark not-ready, stop accepting, then drain the writer.
-	ready.Store(false)
+	a.ready.Store(false)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Error("http shutdown", slog.Any("err", err))
+		a.log.Error("http shutdown", slog.Any("err", err))
 	}
-	// Drain the ingest->ClickHouse batcher (final flush with bounded retry)
-	// before releasing the control-plane pool, so the last buffered summaries
-	// are not lost on a deploy restart.
-	if err := writer.Close(shutdownCtx); err != nil {
-		log.Error("writer drain", slog.Any("err", err))
+	if err := a.writer.Close(shutdownCtx); err != nil {
+		a.log.Error("writer drain", slog.Any("err", err))
 	}
-	closeStore()
-	log.Info("shutdown complete")
+	a.closeStore()
+	a.log.Info("shutdown complete")
 	return nil
 }
 

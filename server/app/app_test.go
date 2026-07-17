@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/arhuman/maping/server/internal/control"
+	"github.com/arhuman/maping/server/internal/ingest"
 	"github.com/arhuman/maping/server/internal/storage"
 	"github.com/arhuman/maping/server/internal/tenant"
 	"github.com/arhuman/maping/server/internal/web"
@@ -116,8 +118,103 @@ func (fakeMemberStore) IssueKey(context.Context, string, string) (string, error)
 	return "secret", nil
 }
 
+// fakeSink is a no-op ingest.RowSink for the assembleMux wiring tests.
+type fakeSink struct{}
+
+func (fakeSink) Enqueue(storage.Row) error { return nil }
+
+// newIngestHandler builds a real ingest handler over fakes so assembleMux can
+// mount it without a live writer.
+func newIngestHandler(t *testing.T) *ingest.Handler {
+	t.Helper()
+	return ingest.NewHandler(
+		ingest.NewStaticKeyResolver(map[string]string{"dev-key": "dev-tenant"}),
+		fakeSink{}, testLogger())
+}
+
+// getNoRedirect issues a GET that does not follow redirects, returning the status
+// code and the Location header (empty when absent).
+func getNoRedirect(t *testing.T, url string) (int, string) {
+	t.Helper()
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Get(url) //nolint:noctx // test-only helper, no request context needed.
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, resp.Header.Get("Location")
+}
+
+// TestAssembleMuxDevModeWiring asserts the no-control-plane wiring: the dashboard
+// is open, and healthz + the ingest Connect path are mounted. This is the boot
+// wiring that build() produces, exercised without a live ClickHouse/Postgres.
+func TestAssembleMuxDevModeWiring(t *testing.T) {
+	mux, ready, cancelBg, err := assembleMux(builtDeps{
+		querier:       nopQuerier{},
+		ingestHandler: newIngestHandler(t),
+		constTenant:   "dev-tenant",
+	}, options{}, testLogger())
+	require.NoError(t, err)
+	defer cancelBg()
+	require.True(t, ready.Load())
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// healthz reflects the readiness flag: 200 while serving, 503 once flipped.
+	code, _ := getNoRedirect(t, srv.URL+"/healthz")
+	assert.Equal(t, http.StatusOK, code)
+	ready.Store(false)
+	code, _ = getNoRedirect(t, srv.URL+"/healthz")
+	assert.Equal(t, http.StatusServiceUnavailable, code)
+
+	// The ingest Connect path is mounted (a bare GET is handled, never a mux 404).
+	code, _ = getNoRedirect(t, srv.URL+"/maping.v1.IngestService/Upload")
+	assert.NotEqual(t, http.StatusNotFound, code)
+
+	// Dev mode has no auth: "/" serves the dashboard directly, not a login redirect.
+	code, loc := getNoRedirect(t, srv.URL+"/")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Empty(t, loc)
+}
+
+// TestAssembleMuxAuthGating asserts that once a control plane (member store +
+// session key) is present, the dashboard is auth-gated: an anonymous "/" redirects
+// to /login. This is the control-plane-dependent routing decision the split makes
+// assertable without infra.
+func TestAssembleMuxAuthGating(t *testing.T) {
+	mux, _, cancelBg, err := assembleMux(builtDeps{
+		querier:       nopQuerier{},
+		ingestHandler: newIngestHandler(t),
+		cp:            &fakeControlPlane{},
+		memberStore:   fakeMemberStore{},
+		constTenant:   "dev-tenant",
+		baseURL:       "http://localhost:8080",
+		sessKey:       bytes.Repeat([]byte("k"), 32),
+	}, options{}, testLogger())
+	require.NoError(t, err)
+	defer cancelBg()
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	code, loc := getNoRedirect(t, srv.URL+"/")
+	assert.Equal(t, http.StatusSeeOther, code)
+	assert.Contains(t, loc, "/login")
+}
+
+// TestResolveControlPlaneDevMode asserts that with no store the derived
+// collaborators are all zero/nil (the static dev path), no error.
+func TestResolveControlPlaneDevMode(t *testing.T) {
+	d, err := resolveControlPlane(nil, options{}, "http://localhost", testLogger())
+	require.NoError(t, err)
+	assert.Nil(t, d.cp)
+	assert.Nil(t, d.memberStore)
+	assert.Nil(t, d.pool)
+	assert.Nil(t, d.sessKey)
+}
+
 // TestWithMaxBody verifies the body-size guardrail rejects over-limit bodies.
-// The rest of Run() blocks on signals and is exercised end-to-end by the
+// The rest of Serve() blocks on signals and is exercised end-to-end by the
 // integration test, not here.
 func TestWithMaxBody(t *testing.T) {
 	var got int
