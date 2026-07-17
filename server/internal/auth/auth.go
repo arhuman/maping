@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -254,23 +255,48 @@ func (a *Auth) readSignedCookie(r *http.Request, name string) (payload string, o
 	return string(raw), true
 }
 
-// setStateCookie stores the OAuth CSRF state (provider|state) in a signed cookie.
+// setStateCookie stores the OAuth CSRF state (provider|state|next, next optional)
+// in a signed cookie. next is the post-login redirect target; it rides in the
+// signed cookie only and is never sent to the provider.
 func (a *Auth) setStateCookie(w http.ResponseWriter, payload string) {
 	a.writeSignedCookie(w, stateCookie, payload, stateMaxAge)
 }
 
-// readStateCookie verifies and splits the state cookie into (provider, state).
-// ok=false when the cookie is absent, malformed, or its MAC does not verify.
-func (a *Auth) readStateCookie(r *http.Request) (provider, state string, ok bool) {
+// readStateCookie verifies and splits the state cookie into (provider, state, next).
+// next is the optional post-login redirect target and is empty when the cookie
+// carries none (older two-field payloads still parse). ok=false when the cookie
+// is absent, malformed, or its MAC does not verify.
+func (a *Auth) readStateCookie(r *http.Request) (provider, state, next string, ok bool) {
 	payload, ok := a.readSignedCookie(r, stateCookie)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
-	parts := strings.SplitN(payload, "|", 2)
-	if len(parts) != 2 {
-		return "", "", false
+	parts := strings.SplitN(payload, "|", 3)
+	if len(parts) < 2 {
+		return "", "", "", false
 	}
-	return parts[0], parts[1], true
+	if len(parts) == 3 {
+		next = parts[2]
+	}
+	return parts[0], parts[1], next, true
+}
+
+// safeNext returns next when it is a safe same-origin path to redirect to after
+// login, and "/" otherwise. It is the sole sanitizer for the post-login redirect,
+// so it must reject anything that could leave this origin: values not beginning
+// with a single "/", scheme-relative ("//host") or backslash ("/\") forms that
+// browsers treat as external, and anything url.Parse reads as having a scheme or
+// host. This closes the open-redirect vector on ?next=.
+func safeNext(next string) string {
+	if next == "" || !strings.HasPrefix(next, "/") ||
+		strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/\\") {
+		return "/"
+	}
+	u, err := url.Parse(next)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	return next
 }
 
 // errAttr wraps an error for structured logging without leaking it into a

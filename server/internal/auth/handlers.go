@@ -77,11 +77,11 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html>
       <p style="margin:0 0 26px;font-size:15px;line-height:1.55;color:#9AA4B2;">One account for your org's dashboard and ingest keys. New here? The same button gets you started.</p>
 
       <div style="display:flex;flex-direction:column;gap:11px;">
-        {{if .GitHub}}<a href="/auth/github/start" style="display:flex;align-items:center;justify-content:center;gap:11px;padding:13px 16px;background:#181F28;border:1px solid rgba(255,255,255,.1);border-radius:11px;font:700 14.5px 'Hanken Grotesk',sans-serif;color:#E8EDF3;">
+        {{if .GitHub}}<a href="/auth/github/start{{if ne .Next "/"}}?next={{.Next}}{{end}}" style="display:flex;align-items:center;justify-content:center;gap:11px;padding:13px 16px;background:#181F28;border:1px solid rgba(255,255,255,.1);border-radius:11px;font:700 14.5px 'Hanken Grotesk',sans-serif;color:#E8EDF3;">
           <svg width="19" height="19" viewBox="0 0 24 24" fill="#E8EDF3"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58l-.01-2.05c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.31-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.87.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22l-.01 3.29c0 .32.22.7.83.58C20.56 22.29 24 17.8 24 12.5 24 5.87 18.63.5 12 .5Z"></path></svg>
           Continue with GitHub
         </a>{{end}}
-        {{if .Google}}<a href="/auth/google/start" style="display:flex;align-items:center;justify-content:center;gap:11px;padding:13px 16px;background:#181F28;border:1px solid rgba(255,255,255,.1);border-radius:11px;font:700 14.5px 'Hanken Grotesk',sans-serif;color:#E8EDF3;">
+        {{if .Google}}<a href="/auth/google/start{{if ne .Next "/"}}?next={{.Next}}{{end}}" style="display:flex;align-items:center;justify-content:center;gap:11px;padding:13px 16px;background:#181F28;border:1px solid rgba(255,255,255,.1);border-radius:11px;font:700 14.5px 'Hanken Grotesk',sans-serif;color:#E8EDF3;">
           <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.52 12.27c0-.82-.07-1.6-.2-2.36H12v4.47h6.47a5.53 5.53 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.57-5.17 3.57-8.74Z"></path><path fill="#34A853" d="M12 24c3.24 0 5.96-1.08 7.95-2.91l-3.88-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.28v3.09A12 12 0 0 0 12 24Z"></path><path fill="#FBBC05" d="M5.27 14.28a7.2 7.2 0 0 1 0-4.56V6.63H1.28a12 12 0 0 0 0 10.74l3.99-3.09Z"></path><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.44-3.44A11.98 11.98 0 0 0 12 0 12 12 0 0 0 1.28 6.63l3.99 3.09C6.22 6.86 8.87 4.75 12 4.75Z"></path></svg>
           Continue with Google
         </a>{{end}}
@@ -97,6 +97,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html>
 
       {{if .DevLogin}}
       <form method="post" action="/auth/dev/login" style="margin-top:{{if or .GitHub .Google}}0{{else}}22px{{end}};">
+        <input type="hidden" name="next" value="{{.Next}}">
         <button type="submit" style="width:100%;display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 16px;background:transparent;border:1px dashed rgba(255,255,255,.14);border-radius:11px;font:600 13.5px 'JetBrains Mono',monospace;color:#9AA4B2;cursor:pointer;">
           <span style="color:#B4F14A;">›_</span> Dev login (admin)
         </button>
@@ -187,7 +188,7 @@ code{color:#E8EDF3;font:600 12px 'JetBrains Mono',monospace;}
 <p class="warn">⚠ COPY IT NOW — YOU WON'T SEE IT AGAIN <button class="copy" data-copy="mp-key" type="button">⧉ copy</button></p>
 <code class="key" id="mp-key">export MAPING_KEY={{.Token}}</code>
 <p class="hint">Lost it? Mint a new one anytime on the Setup page.</p>
-<a class="go" href="/">Continue to dashboard →</a>
+<a class="go" href="{{.Next}}">Continue to dashboard →</a>
 </div>
 <script src="/assets/copy.js" defer></script>
 </body></html>`))
@@ -195,7 +196,7 @@ code{color:#E8EDF3;font:600 12px 'JetBrains Mono',monospace;}
 // handleLoginPage renders the sign-in page. The provider buttons and dev-login
 // form are gated on the deployment's real configuration, so the page never offers
 // an auth path the server cannot honor.
-func (a *Auth) handleLoginPage(w http.ResponseWriter, _ *http.Request) {
+func (a *Auth) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	_, github := a.providers[providerGitHub]
 	_, google := a.providers[providerGoogle]
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -206,7 +207,8 @@ func (a *Auth) handleLoginPage(w http.ResponseWriter, _ *http.Request) {
 		GitHub   bool
 		Google   bool
 		DevLogin bool
-	}{GitHub: github, Google: google, DevLogin: a.devLogin}); err != nil {
+		Next     string
+	}{GitHub: github, Google: google, DevLogin: a.devLogin, Next: safeNext(r.URL.Query().Get("next"))}); err != nil {
 		a.log.Error("auth: render login", errAttr(err))
 	}
 }
@@ -223,8 +225,9 @@ func (a *Auth) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	state := randomToken(32)
 	// Bind the state to the provider so the callback can only be replayed for
-	// the provider that started the flow.
-	a.setStateCookie(w, string(name)+"|"+state)
+	// the provider that started the flow. A sanitized post-login redirect target
+	// rides in the same signed cookie (never sent to the provider).
+	a.setStateCookie(w, string(name)+"|"+state+"|"+safeNext(r.URL.Query().Get("next")))
 	http.Redirect(w, r, p.config.AuthCodeURL(state, oauth2.AccessTypeOnline), http.StatusSeeOther)
 }
 
@@ -241,7 +244,7 @@ func (a *Auth) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	defer a.clearCookie(w, stateCookie)
 
-	id, ok := a.resolveIdentity(w, r, name, p)
+	id, next, ok := a.resolveIdentity(w, r, name, p)
 	if !ok {
 		return
 	}
@@ -266,40 +269,40 @@ func (a *Auth) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// interstitial. No cookie carries the plaintext; the OAuth code is single-use,
 	// so this render is inherently reveal-once. Returning users go straight in.
 	if isNew {
-		a.renderKeyInterstitial(w, r, orgID)
+		a.renderKeyInterstitial(w, r, orgID, next)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(next), http.StatusSeeOther)
 }
 
 // resolveIdentity validates the OAuth CSRF state, exchanges the code, and fetches
 // the verified provider identity. On any failure it writes the appropriate error
 // response and returns ok=false; the caller simply returns. Token/provider detail
 // is never leaked to the client.
-func (a *Auth) resolveIdentity(w http.ResponseWriter, r *http.Request, name providerName, p provider) (identity, bool) {
-	wantProvider, wantState, ok := a.readStateCookie(r)
+func (a *Auth) resolveIdentity(w http.ResponseWriter, r *http.Request, name providerName, p provider) (id identity, next string, ok bool) {
+	wantProvider, wantState, next, ok := a.readStateCookie(r)
 	if !ok || wantProvider != string(name) || wantState == "" || r.URL.Query().Get("state") != wantState {
 		http.Error(w, "invalid oauth state", http.StatusBadRequest)
-		return identity{}, false
+		return identity{}, "", false
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "missing code", http.StatusBadRequest)
-		return identity{}, false
+		return identity{}, "", false
 	}
 	tok, err := p.config.Exchange(a.oauthClientCtx(r.Context()), code)
 	if err != nil {
 		a.log.Warn("auth: token exchange failed", errAttr(err))
 		http.Error(w, "authentication failed", http.StatusBadGateway)
-		return identity{}, false
+		return identity{}, "", false
 	}
-	id, err := a.userinfo(r.Context(), name, p.config, tok)
+	id, err = a.userinfo(r.Context(), name, p.config, tok)
 	if err != nil {
 		a.log.Warn("auth: userinfo failed", errAttr(err))
 		http.Error(w, "authentication failed", http.StatusBadGateway)
-		return identity{}, false
+		return identity{}, "", false
 	}
-	return id, true
+	return id, next, true
 }
 
 // renderKeyInterstitial mints the org's first ingest key and shows the full token
@@ -307,11 +310,12 @@ func (a *Auth) resolveIdentity(w http.ResponseWriter, r *http.Request, name prov
 // both the credential and the collector endpoint. Issuing is best-effort: a
 // failure logs and falls through to the dashboard rather than stranding the user
 // (they can mint a key on the Setup page).
-func (a *Auth) renderKeyInterstitial(w http.ResponseWriter, r *http.Request, orgID string) {
+func (a *Auth) renderKeyInterstitial(w http.ResponseWriter, r *http.Request, orgID, next string) {
+	next = safeNext(next)
 	secret, err := a.store.IssueKey(r.Context(), orgID, "default")
 	if err != nil {
 		a.log.Error("auth: issue first key", errAttr(err))
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	tok := token.Encode(a.baseURL, secret)
@@ -319,7 +323,7 @@ func (a *Auth) renderKeyInterstitial(w http.ResponseWriter, r *http.Request, org
 	// Same JS-budget CSP as the dashboard: the interstitial's copy button is
 	// driven by /assets/copy.js, the only script allowed to run.
 	w.Header().Set("Content-Security-Policy", interstitialCSP)
-	if err := interstitialPage.Execute(w, struct{ Token string }{tok}); err != nil {
+	if err := interstitialPage.Execute(w, struct{ Token, Next string }{tok, next}); err != nil {
 		a.log.Error("auth: render interstitial", errAttr(err))
 	}
 }
@@ -334,7 +338,7 @@ func (a *Auth) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setSessionCookie(w, newSession(orgID, memberID, "admin"))
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(r.FormValue("next")), http.StatusSeeOther)
 }
 
 // handleLogout clears the session cookie and redirects to /login.
