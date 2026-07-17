@@ -84,7 +84,7 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 		return nil, nil, nil, err
 	}
 	webCfg := buildWebConfig(d.querier, d.cp, d.memberAdmin, d.card, authLayer != nil, d.constTenant, d.baseURL, d.sessKey, log)
-	webCfg.ExtraNav = o.navItems
+	webCfg.AccountHref = o.accountHref
 	webHandler, err := web.NewHandler(webCfg)
 	if err != nil {
 		return nil, nil, nil, err
@@ -116,7 +116,7 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 		gate = authLayer.Middleware
 		sessionOrg = auth.TenantFromContext
 	}
-	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, log)
+	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, webHandler.RenderShellPage, log)
 
 	// Background loops (extension jobs) share one context, cancelled on shutdown so
 	// every goroutine exits before the pool closes.

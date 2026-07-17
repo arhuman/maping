@@ -117,6 +117,8 @@ a{color:inherit;text-decoration:none;}
 .nav-ico{width:18px;height:18px;display:grid;place-items:center;color:var(--txt-3);}
 .nav-item.on .nav-ico{color:var(--accent);}
 .nav-badge{font:600 10px var(--mono);color:var(--txt-2);background:var(--panel-3);padding:2px 6px;border-radius:20px;}
+.userbox{display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:9px;color:inherit;text-decoration:none;}
+a.userbox:hover{background:rgba(255,255,255,.04);}
 /* topbar */
 .header{display:flex;align-items:center;gap:16px;padding:16px 30px;border-bottom:1px solid var(--line);background:rgba(10,12,15,.6);backdrop-filter:blur(8px);}
 .crumbs{display:flex;align-items:center;gap:9px;font:600 12.5px var(--mono);color:var(--txt-3);}
@@ -175,13 +177,14 @@ pre{margin:0;padding:16px 17px;font:500 12.5px/1.7 var(--mono);color:var(--txt-2
       <a href="/setup" style="font:500 11.5px var(--mono);color:var(--txt-3);letter-spacing:.3px;text-decoration:none;">no active key</a>
       {{end}}
     </div>
-    <div style="display:flex;align-items:center;gap:8px;padding:0 4px;">
+    {{if .AccountHref}}<a href="{{.AccountHref}}" class="userbox">{{else}}<div class="userbox">{{end}}
       <div style="width:30px;height:30px;border-radius:50%;background:var(--panel-3);border:1px solid var(--line);display:grid;place-items:center;font:700 11px var(--ui);color:var(--txt-2);">{{initials .User}}</div>
       <div style="line-height:1.2;flex:1;overflow:hidden;">
         <div style="font-size:12px;font-weight:600;white-space:nowrap;">{{.User}}</div>
         <div style="font:500 10px/1 var(--mono);color:var(--txt-3);margin-top:2px;">{{.Role}}</div>
       </div>
-    </div>
+      {{if .AccountHref}}<span style="color:var(--txt-3);font-size:15px;line-height:1;">›</span>{{end}}
+    {{if .AccountHref}}</a>{{else}}</div>{{end}}
   </div>
 </aside>
 {{end}}
@@ -215,6 +218,12 @@ pre{margin:0;padding:16px 17px;font:500 12.5px/1.7 var(--mono);color:var(--txt-2
   {{end}}
 </header>
 {{end}}
+
+{{define "shellpage"}}<!doctype html>
+<html lang="en"><head>{{template "head"}}<title>mAPI-ng — {{.Title}}</title></head>
+<body><div class="app">{{template "sidebar" .Shell}}<main class="main">{{template "topbar" .Shell}}
+<div class="scrollbody"><div class="fade">{{.Content}}</div></div>
+</main></div></body></html>{{end}}
 
 {{define "kpi"}}
 <div class="kpi">

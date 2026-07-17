@@ -26,8 +26,4 @@ type (
 	MemberInfo = web.MemberInfo
 	// InviteInfo is a listed pending invite rendered in the team panel.
 	InviteInfo = web.InviteInfo
-	// NavItem is an extra sidebar entry a composing build injects via WithNavItem,
-	// e.g. a link to an enterprise-owned page (like /account) the core does not know
-	// about. It renders after the core nav items and is never marked active.
-	NavItem = web.NavItem
 )

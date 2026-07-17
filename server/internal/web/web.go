@@ -37,20 +37,20 @@ import (
 // Handler serves the 3-level dashboard, the onboarding panel, and the JSON data
 // endpoints. Every dependency beyond the querier is injected and nil-safe.
 type Handler struct {
-	q          Querier
-	tenant     TenantResolver
-	onboarding OnboardingSource // may be nil (no control plane).
-	frozen     FrozenFunc       // may be nil (no guardrail signal).
-	keys       KeyAdmin         // may be nil (no control plane): hides the keys panel.
-	members    MemberAdmin      // may be nil (no control plane): hides the team panel.
-	roleOf     RoleResolver     // may be nil: per-request role for admin-gating team actions.
-	csrf       *csrf            // nil when keys/members are nil; guards the Setup POSTs.
-	org        string           // sidebar identity chrome (display only).
-	user       string
-	role       string
-	extraNav   []navItem // extra sidebar entries injected by a composing build.
-	log        *slog.Logger
-	tpl        *template.Template
+	q           Querier
+	tenant      TenantResolver
+	onboarding  OnboardingSource // may be nil (no control plane).
+	frozen      FrozenFunc       // may be nil (no guardrail signal).
+	keys        KeyAdmin         // may be nil (no control plane): hides the keys panel.
+	members     MemberAdmin      // may be nil (no control plane): hides the team panel.
+	roleOf      RoleResolver     // may be nil: per-request role for admin-gating team actions.
+	csrf        *csrf            // nil when keys/members are nil; guards the Setup POSTs.
+	org         string           // sidebar identity chrome (display only).
+	user        string
+	role        string
+	accountHref string // when set, the sidebar user block links here (composing build's account page).
+	log         *slog.Logger
+	tpl         *template.Template
 }
 
 // Config bundles the Handler dependencies so NewHandler's signature stays
@@ -78,16 +78,10 @@ type Config struct {
 	OrgName  string
 	UserName string
 	UserRole string
-	// ExtraNav are additional sidebar entries a composing build injects (via
-	// app.WithNavItem) — e.g. a link to an enterprise-owned page the core does not
-	// know about. They render after the core items and are never marked active.
-	ExtraNav []NavItem
-}
-
-// NavItem is an extra sidebar entry a composing build injects through
-// app.WithNavItem. Icon is a single display glyph matching the core nav style.
-type NavItem struct {
-	Label, Icon, Href string
+	// AccountHref, when non-empty, turns the sidebar user-identity block into a link
+	// to that path — a composing build (via app.WithAccountLink) points it at the
+	// account page it owns. Empty leaves the block a non-interactive display element.
+	AccountHref string
 }
 
 // NewHandler builds the dashboard Handler. Querier and Tenant are required;
@@ -112,34 +106,21 @@ func NewHandler(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("web.NewHandler: parse templates: %w", err)
 	}
 	return &Handler{
-		q:          cfg.Querier,
-		tenant:     cfg.Tenant,
-		onboarding: cfg.Onboarding,
-		frozen:     cfg.Frozen,
-		keys:       cfg.KeyAdmin,
-		members:    cfg.MemberAdmin,
-		roleOf:     cfg.Role,
-		csrf:       newCSRF(cfg.CSRFKey),
-		org:        orDefault(cfg.OrgName, "mAPI-ng"),
-		user:       orDefault(cfg.UserName, "dev"),
-		role:       orDefault(cfg.UserRole, "admin"),
-		extraNav:   toNavItems(cfg.ExtraNav),
-		log:        log,
-		tpl:        tpl,
+		q:           cfg.Querier,
+		tenant:      cfg.Tenant,
+		onboarding:  cfg.Onboarding,
+		frozen:      cfg.Frozen,
+		keys:        cfg.KeyAdmin,
+		members:     cfg.MemberAdmin,
+		roleOf:      cfg.Role,
+		csrf:        newCSRF(cfg.CSRFKey),
+		org:         orDefault(cfg.OrgName, "mAPI-ng"),
+		user:        orDefault(cfg.UserName, "dev"),
+		role:        orDefault(cfg.UserRole, "admin"),
+		accountHref: cfg.AccountHref,
+		log:         log,
+		tpl:         tpl,
 	}, nil
-}
-
-// toNavItems converts the injected NavItems into the internal nav entries the
-// shell renders (never active, no badge).
-func toNavItems(items []NavItem) []navItem {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]navItem, len(items))
-	for i, it := range items {
-		out[i] = navItem{Label: it.Label, Icon: it.Icon, Href: it.Href}
-	}
-	return out
 }
 
 // orDefault returns v when non-empty, else def.
@@ -181,7 +162,8 @@ func (h *Handler) buildShell(r *http.Request, activeNav string, crumbs []crumb, 
 		Org:          h.org,
 		User:         h.user,
 		Role:         h.role,
-		Nav:          append(buildNav(activeNav, winKey), h.extraNav...),
+		AccountHref:  h.accountHref,
+		Nav:          buildNav(activeNav, winKey),
 		Crumbs:       crumbs,
 		PageTitle:    title,
 		ShowControls: showControls,
@@ -189,6 +171,24 @@ func (h *Handler) buildShell(r *http.Request, activeNav string, crumbs []crumb, 
 		WindowKey:    winKey,
 		FlushLabel:   "flush 10s",
 		KeyMask:      h.activeKeyMask(r),
+	}
+}
+
+// RenderShellPage renders inner content wrapped in the full dashboard chrome
+// (sidebar + top bar), so a composing build can present a page it owns — e.g. an
+// account page — that looks native to the dashboard rather than a detached page.
+// content is trusted HTML the caller has already escaped/produced from a template;
+// title sets the top-bar heading and the browser tab.
+func (h *Handler) RenderShellPage(w http.ResponseWriter, r *http.Request, title string, content template.HTML) {
+	shell := h.buildShell(r, "", []crumb{{Label: title}}, title, false, normalizeWindow(r.URL.Query().Get("win")))
+	data := struct {
+		Shell   Shell
+		Title   string
+		Content template.HTML
+	}{Shell: shell, Title: title, Content: content}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.tpl.ExecuteTemplate(w, "shellpage", data); err != nil {
+		h.log.Error("web: render shell page", slog.Any("err", err))
 	}
 }
 

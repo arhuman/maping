@@ -60,7 +60,7 @@ func TestMountExtensionsMountsExtraRoutes(t *testing.T) {
 				_, _ = w.Write([]byte("pong"))
 			})
 		},
-	}, nil, nil, nil, testLogger())
+	}, nil, nil, nil, nil, testLogger())
 
 	require.True(t, called, "registrar must be invoked")
 	rec := httptest.NewRecorder()

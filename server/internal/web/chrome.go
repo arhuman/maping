@@ -21,13 +21,16 @@ import (
 // Shell so the shared sidebar/topbar sub-templates render from one place.
 type Shell struct {
 	Org, User, Role string
-	Nav             []navItem
-	Crumbs          []crumb
-	PageTitle       string
-	ShowControls    bool
-	Windows         []windowOption
-	WindowKey       string
-	FlushLabel      string
+	// AccountHref, when non-empty, makes the sidebar user-identity block a link to
+	// the composing build's account page. Empty leaves it a display-only element.
+	AccountHref  string
+	Nav          []navItem
+	Crumbs       []crumb
+	PageTitle    string
+	ShowControls bool
+	Windows      []windowOption
+	WindowKey    string
+	FlushLabel   string
 	// KeyMask is the masked last-4 ("····<last4>") of the tenant's newest active
 	// ingest key, shown in the sidebar. Empty when there is no control plane or no
 	// active key, so the sidebar shows a muted "no active key" instead of a fake.

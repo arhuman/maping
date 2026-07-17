@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -32,6 +33,11 @@ type RouteContext struct {
 	// caller's org (never the request body), keeping the session context key
 	// private to auth. Nil when auth is off.
 	SessionOrg func(*http.Request) (orgID string, ok bool)
+	// RenderShell writes a full dashboard page (sidebar + top bar chrome) wrapping
+	// the given content, so an extension's own page looks native to the dashboard
+	// instead of a detached page. content is trusted HTML the caller produced from a
+	// template; title sets the top-bar heading and browser tab. Always non-nil.
+	RenderShell func(w http.ResponseWriter, r *http.Request, title string, content template.HTML)
 }
 
 // JobContext is what a WithBackgroundJob task receives. Ctx is cancelled at
@@ -86,7 +92,7 @@ type options struct {
 	loginInterceptor LoginInterceptorFactory
 	memberAdmin      MemberAdminFactory
 	publicHome       http.HandlerFunc
-	navItems         []NavItem
+	accountHref      string
 }
 
 // Option configures Run.
@@ -149,23 +155,22 @@ func WithPublicHome(home http.HandlerFunc) Option {
 	return func(o *options) { o.publicHome = home }
 }
 
-// WithNavItem adds one or more entries to the dashboard sidebar nav, after the core
-// items (Services, Performance, Setup). A composing build uses it to surface a page
-// it owns — e.g. an /account page — that the core cannot know about. The items are
-// display-only links (never marked active) and appear on every dashboard page. The
-// composing build is responsible for only injecting links to routes it actually
-// mounts (e.g. gating on the control plane), so the nav never points at a 404.
-func WithNavItem(items ...NavItem) Option {
-	return func(o *options) { o.navItems = append(o.navItems, items...) }
+// WithAccountLink turns the dashboard sidebar's user-identity block into a link to
+// href — a composing build points it at the account page it owns (e.g. "/account").
+// Public default: empty, so the block stays a non-interactive display element. The
+// composing build should only set it when it actually mounts that route (e.g. gating
+// on the control plane) so the link never points at a 404.
+func WithAccountLink(href string) Option {
+	return func(o *options) { o.accountHref = href }
 }
 
 // mountExtensions applies each WithRoutes registrar onto the server mux after the
 // core routes are mounted. pool is nil in static dev mode; gate and sessionOrg are
 // nil when auth is off, so a registrar needing authenticated routes checks them
 // and mounts nothing when absent.
-func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), log *slog.Logger) {
+func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
 	for _, r := range routes {
-		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg})
+		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, RenderShell: renderShell})
 	}
 	if len(routes) > 0 {
 		log.Info("extension routes mounted", slog.Int("count", len(routes)))

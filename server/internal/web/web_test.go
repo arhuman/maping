@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,18 +151,30 @@ func TestNewHandlerValidation(t *testing.T) {
 	require.Error(t, err, "nil Tenant must error")
 }
 
-func TestExtraNavRendersInSidebar(t *testing.T) {
-	srv := newServer(t, Config{
-		Querier:  fakeQuerier{},
-		Tenant:   constTenant,
-		ExtraNav: []NavItem{{Label: "Account", Icon: "◉", Href: "/account"}},
-	})
+func TestAccountHrefLinksUserBlock(t *testing.T) {
+	srv := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant, AccountHref: "/account"})
 	code, body := getBody(t, srv.URL+"/")
 	require.Equal(t, http.StatusOK, code)
-	// The injected item renders after the core nav items.
-	assert.Contains(t, body, `href="/account"`, "injected nav href must render in the sidebar")
-	assert.Contains(t, body, "Account", "injected nav label must render")
-	assert.Contains(t, body, "/performance?win=", "core nav items must still render")
+	assert.Contains(t, body, `<a href="/account" class="userbox">`, "user block links to the account page when AccountHref is set")
+
+	plain := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant})
+	_, pbody := getBody(t, plain.URL+"/")
+	assert.NotContains(t, pbody, `href="/account"`, "no account link without AccountHref")
+}
+
+func TestRenderShellPage(t *testing.T) {
+	h, err := NewHandler(Config{Querier: fakeQuerier{}, Tenant: constTenant, AccountHref: "/account"})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	h.RenderShellPage(rec, httptest.NewRequest(http.MethodGet, "/account", nil),
+		"Account", template.HTML(`<div class="panel">HELLO-CONTENT</div>`))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "HELLO-CONTENT", "content renders inside the shell")
+	assert.Contains(t, body, `class="aside"`, "sidebar chrome renders")
+	assert.Contains(t, body, "mAPI-ng — Account", "browser title set from page title")
+	assert.Contains(t, body, `<a href="/account" class="userbox">`, "user block links to account inside the shell page too")
 }
 
 func TestCopyJSAssetServed(t *testing.T) {
