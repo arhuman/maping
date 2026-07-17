@@ -1,0 +1,5 @@
+github.com/arhuman/maping/client v0.3.0/go.mod h1:sNWbNh5dGJBcSAVW70E/4WRAbOGDblzt31KqpneVfsU=
+github.com/arhuman/maping/proto v0.3.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
+github.com/go-chi/chi/v5 v5.3.1 h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=
+github.com/go-chi/chi/v5 v5.3.1/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
+github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
