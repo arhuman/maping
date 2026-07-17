@@ -461,15 +461,16 @@ func TestEndpointDetailExemplarsPanel(t *testing.T) {
 	assert.Contains(t, ex, "—")
 }
 
-// TestEndpointDetailExemplarsEmpty asserts the empty-state row renders when no
-// exemplars are captured in the window.
+// TestEndpointDetailExemplarsEmpty asserts the exemplars panel is omitted
+// entirely (no empty-state row) when no exemplars are captured in the window.
 func TestEndpointDetailExemplarsEmpty(t *testing.T) {
 	q := fakeQuerier{detail: storage.EndpointDetail{Count: 100, ErrorRate: 0.05}}
 	srv := newServer(t, Config{Querier: q, Tenant: constTenant})
 
 	code, body := getBody(t, srv.URL+"/services/svc/endpoint?method=GET&route=/x")
 	assert.Equal(t, http.StatusOK, code)
-	assert.Contains(t, body, "No exemplars captured in this window.")
+	assert.NotContains(t, body, "No exemplars captured in this window.")
+	assert.NotContains(t, body, "Exemplars")
 }
 
 // TestEndpointDetailStatusClassSplit asserts the success-vs-error latency split

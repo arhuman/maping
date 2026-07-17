@@ -8,11 +8,6 @@ const tplDetailHTML = `
 <body><div class="app">{{template "sidebar" .Shell}}<main class="main">{{template "topbar" .Shell}}
 <div class="scrollbody"><div class="fade">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;"><span class="chip {{mcls .Method}}" style="font-size:12px;padding:5px 10px;border-radius:7px;">{{.Method}}</span><span style="font:600 18px var(--mono);">{{.Route}}</span></div>
-  <div class="panel" style="padding:13px 16px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-    <span style="font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;flex-shrink:0;">DEBUG CONTEXT</span>
-    <span id="mp-debug" class="mono" style="flex:1;min-width:220px;font-size:12px;color:var(--txt-2);word-break:break-word;">{{.Debug.Summary}}</span>
-    <button type="button" data-copy="mp-debug" style="flex-shrink:0;padding:5px 11px;border:1px solid var(--line);border-radius:7px;background:var(--panel-3);color:var(--txt-2);font:600 11px var(--mono);cursor:pointer;">⧉ copy</button>
-  </div>
   <div class="kpistrip" style="grid-template-columns:repeat(5,1fr);">{{range .Stats}}{{template "kpi" .}}{{end}}</div>
   <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start;">
     <div class="panel" style="padding:18px 20px;">
@@ -41,19 +36,29 @@ const tplDetailHTML = `
         <div style="height:6px;background:var(--panel-3);border-radius:4px;overflow:hidden;"><div style="height:100%;width:{{.Pct}};border-radius:4px;" class="{{.BarClass}}"></div></div>
       </div>
       {{end}}
+      {{if .Detail.Codes}}
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line);">
         <div style="font:600 10px var(--mono);color:var(--txt-3);letter-spacing:.8px;margin-bottom:10px;">EXACT CODES</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;">
           {{range .Detail.Codes}}<span style="font:600 11px var(--mono);color:var(--txt-2);background:var(--panel-3);border:1px solid var(--line);padding:4px 9px;border-radius:7px;"><span class="{{codec .Code}}">{{.Code}}</span> · {{.Count}}</span>{{end}}
         </div>
       </div>
+      {{end}}
     </div>
+  </div>
+  <details class="diag">
+  <summary>Diagnostic details</summary>
+  <div class="panel" style="padding:13px 16px;margin-top:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <span style="font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;flex-shrink:0;">DEBUG CONTEXT</span>
+    <span id="mp-debug" class="mono" style="flex:1;min-width:220px;font-size:12px;color:var(--txt-2);word-break:break-word;">{{.Debug.Summary}}</span>
+    <button type="button" data-copy="mp-debug" style="flex-shrink:0;padding:5px 11px;border:1px solid var(--line);border-radius:7px;background:var(--panel-3);color:var(--txt-2);font:600 11px var(--mono);cursor:pointer;">⧉ copy</button>
   </div>
   <div class="panel" style="padding:18px 20px;margin-top:18px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13.5px;font-weight:700;">Latency distribution</span><span style="font:500 11px var(--mono);color:var(--txt-3);">DDSketch · γ=1.01 · ~1% relative error</span></div>
     <div style="font:500 11px var(--mono);color:var(--txt-3);margin-bottom:8px;">merged bucket counts · log-spaced latency</div>
     {{.HistChart}}
   </div>
+  {{if .Instances}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Instances</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">is a degradation one replica, or fleet-wide?</span></div>
     <div class="thead" style="grid-template-columns:2fr 1fr 1fr .8fr .8fr .8fr .9fr .9fr;">
@@ -70,10 +75,10 @@ const tplDetailHTML = `
       <div class="tnum-s">{{bytes .ReqBytesAvg}}</div>
       <div class="tnum-s">{{bytes .RespBytesAvg}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No per-instance data in this window.</div>
     {{end}}
   </div>
+  {{end}}
+  {{if .Versions}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Versions</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">did a release regress this endpoint?</span></div>
     <div class="thead" style="grid-template-columns:2fr 1fr 1fr .8fr .8fr .8fr;">
@@ -88,10 +93,10 @@ const tplDetailHTML = `
       <div class="tnum-s">{{msf .P95}}</div>
       <div class="tnum-s {{p99c .P99}}">{{msf .P99}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No per-version data in this window.</div>
     {{end}}
   </div>
+  {{end}}
+  {{if .Exemplars}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Exemplars</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">jump from a spike to a real request</span></div>
     <div class="thead" style="grid-template-columns:.9fr .7fr .8fr 1.6fr 1.6fr;">
@@ -117,10 +122,10 @@ const tplDetailHTML = `
         {{else}}<span class="mono" style="font-size:12px;color:var(--txt-3);">—</span>{{end}}
       </div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No exemplars captured in this window.</div>
     {{end}}
   </div>
+  {{end}}
+  {{if .ClassLatency}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Latency by status class</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">is the latency on failures, or also on successes?</span></div>
     <div class="thead" style="grid-template-columns:1.4fr 1fr 1fr 1fr 1fr;">
@@ -134,10 +139,9 @@ const tplDetailHTML = `
       <div class="tnum-s">{{msf .P95}}</div>
       <div class="tnum-s {{p99c .P99}}">{{msf .P99}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No latency-by-class data in this window.</div>
     {{end}}
   </div>
+  {{end}}
   <div class="panel" style="padding:18px 20px;margin-top:18px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13.5px;font-weight:700;">Self vs downstream</span><span style="font:500 11px var(--mono);color:var(--txt-3);">where does the time go?</span></div>
     {{if .Downstream.HasData}}
@@ -155,6 +159,7 @@ const tplDetailHTML = `
     <div style="padding:14px 0 2px;color:var(--txt-3);font-size:13px;">No downstream timing in this window. Set <span style="font:600 12px var(--mono);color:var(--txt-2);">maping.NewRoundTripper</span> as the Transport of your outbound http.Client to split self vs downstream time.</div>
     {{end}}
   </div>
+  {{if .ErrorClasses}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Error classes</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">what is behind the errors?</span></div>
     <div class="thead" style="grid-template-columns:3fr 1fr;">
@@ -165,10 +170,10 @@ const tplDetailHTML = `
       <div style="font:600 12.5px var(--mono);color:var(--txt-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{.Class}}</div>
       <div class="tnum">{{.Count}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No error labels reported in this window.</div>
     {{end}}
   </div>
+  {{end}}
+  {{if .NoStatusReasons}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">No-status reasons</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">timing out, canceling, or crashing?</span></div>
     <div class="thead" style="grid-template-columns:3fr 1fr;">
@@ -179,10 +184,10 @@ const tplDetailHTML = `
       <div style="font:600 12.5px var(--mono);color:var(--txt-2);">{{.Reason}}</div>
       <div class="tnum">{{.Count}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No no-status requests in this window.</div>
     {{end}}
   </div>
+  {{end}}
+  {{if .Resources}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Resources</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">saturation per instance — GC or goroutines behind a slowdown?</span></div>
     <div class="thead" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;">
@@ -197,10 +202,10 @@ const tplDetailHTML = `
       <div class="tnum-s">{{bytes .HeapBytes}}</div>
       <div class="tnum">{{.Goroutines}}</div>
     </div>
-    {{else}}
-    <div style="padding:22px 20px;color:var(--txt-3);font-size:13px;">No instance resource samples in this window. Update the SDK to a version that ships USE gauges.</div>
     {{end}}
   </div>
+  {{end}}
+  </details>
 </div></div>
 </main></div>
 <script src="/assets/copy.js" defer></script>

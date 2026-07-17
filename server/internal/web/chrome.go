@@ -307,6 +307,27 @@ func p99Class(sec float64) string {
 	return "c-txt2"
 }
 
+// fmtSpread renders the latency spread P95/P50 as e.g. "1.07×"; a non-positive
+// P50 or P95 yields an em-dash, since the spread is undefined without both.
+func fmtSpread(p50, p95 float64) string {
+	if p50 <= 0 || p95 <= 0 {
+		return "—"
+	}
+	return strconv.FormatFloat(p95/p50, 'f', 2, 64) + "×"
+}
+
+// spreadClass flags an elevated latency spread (>=2.5×) with the same warn colour
+// as p99Class; a tight or undefined spread stays neutral (c-txt).
+func spreadClass(p50, p95 float64) string {
+	if p50 <= 0 || p95 <= 0 {
+		return "c-txt"
+	}
+	if p95/p50 >= 2.5 {
+		return "c-warn"
+	}
+	return "c-txt"
+}
+
 // healthClass picks the service health dot from its error rate.
 func healthClass(f float64) string {
 	switch {
@@ -426,7 +447,7 @@ func detailStats(d detailView, winSeconds float64) []kpi {
 		{Label: "ERROR RATE", Value: fmtPctD(d.ErrorRate), ColorClass: errClass(d.ErrorRate)},
 		{Label: "p50", Value: fmtMsVal(d.P50), Unit: fmtMsUnit(d.P50), ColorClass: "c-txt"},
 		{Label: "p95", Value: fmtMsVal(d.P95), Unit: fmtMsUnit(d.P95), ColorClass: "c-txt"},
-		{Label: "p99", Value: fmtMsVal(d.P99), Unit: fmtMsUnit(d.P99), ColorClass: p99Class(d.P99)},
+		{Label: "SPREAD", Value: fmtSpread(d.P50, d.P95), ColorClass: spreadClass(d.P50, d.P95)},
 	}
 }
 

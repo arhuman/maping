@@ -98,6 +98,12 @@ a{color:inherit;text-decoration:none;}
 .kpi-u{font:600 12px var(--mono);color:var(--txt-3);}
 .kpi-sub{font:500 11px var(--mono);color:var(--txt-3);margin-top:8px;}
 .kpistrip{display:grid;gap:14px;margin-bottom:24px;}
+/* diagnostic disclosure */
+.diag{margin-top:18px;}
+.diag>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:14px 18px;font:700 13.5px var(--ui);color:var(--txt-2);background:var(--panel);border:1px solid var(--line);border-radius:14px;user-select:none;}
+.diag>summary::-webkit-details-marker{display:none;}
+.diag>summary::before{content:"▸";color:var(--txt-3);font:600 11px var(--mono);}
+.diag[open]>summary::before{content:"▾";}
 /* table */
 .thead,.trow{display:grid;align-items:center;}
 .thead{padding:12px 20px;border-bottom:1px solid var(--line);font:600 10.5px var(--mono);color:var(--txt-3);letter-spacing:.8px;background:var(--panel-2);}
