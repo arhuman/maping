@@ -246,6 +246,52 @@ func TestObserveAggregatesIntoSeries(t *testing.T) {
 	assert.Equal(t, uint64(1), all[key5xx].count)
 }
 
+// TestObserveConcurrentAggregationIsExact drives Observe from many goroutines to
+// prove the sharded aggregation counts every observation exactly once under
+// contention. Sharding is the recorder's explicit design goal, but `-race` only
+// catches a data race, not a race-free lost update — a miscounting aggregation
+// would surface here as a total below goroutines*perGoroutine.
+func TestObserveConcurrentAggregationIsExact(t *testing.T) {
+	r := newTestRecorder(&fakeTransport{})
+
+	const goroutines = 50
+	const perGoroutine = 200
+	const dur = 2 * time.Millisecond
+
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range perGoroutine {
+				// Two series so both intra-series contention and concurrent writes to
+				// distinct shards are exercised.
+				r.Observe(Record{Method: "GET", RouteTemplate: "/x", Status: 200, Duration: dur})
+				r.Observe(Record{Method: "GET", RouteTemplate: "/x", Status: 500, Duration: dur})
+			}
+		}()
+	}
+	wg.Wait()
+
+	total := uint64(goroutines * perGoroutine)
+	all := r.collectSeries()
+
+	key2xx := seriesKey{method: "GET", route: "/x", class: mapingv1.StatusClass_STATUS_CLASS_2XX}
+	key5xx := seriesKey{method: "GET", route: "/x", class: mapingv1.StatusClass_STATUS_CLASS_5XX}
+
+	s2 := all[key2xx]
+	require.NotNil(t, s2)
+	assert.Equal(t, total, s2.count, "every 2xx observation counted exactly once")
+	assert.Equal(t, total, s2.sk.Count(), "sketch saw every 2xx observation")
+	assert.Equal(t, total, s2.codes[200])
+	assert.Equal(t, total*uint64(dur.Nanoseconds()), s2.sumDurationNs, "durations summed without lost updates")
+
+	s5 := all[key5xx]
+	require.NotNil(t, s5)
+	assert.Equal(t, total, s5.count, "every 5xx observation counted exactly once")
+	assert.Equal(t, total, s5.codes[500])
+}
+
 func TestRecordCodeBounded(t *testing.T) {
 	codes := make(map[uint32]uint64)
 	for i := range maxStatusCodes + 10 {
