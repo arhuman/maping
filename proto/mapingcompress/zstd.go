@@ -48,16 +48,24 @@ func (c *compressor) Reset(w io.Writer)           { c.enc.Reset(w) }
 type decompressor struct{ dec *zstd.Decoder }
 
 func newDecompressor() connect.Decompressor {
-	dec, _ := zstd.NewReader(nil)
+	// WithDecoderConcurrency(1) keeps the decoder fully synchronous so it spawns
+	// no background goroutines — safe to leave running when Connect's pool
+	// abandons an instance to the GC, since Close() below never terminates it.
+	dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
 	return &decompressor{dec: dec}
 }
 
 func (d *decompressor) Read(p []byte) (int, error) { return d.dec.Read(p) }
 func (d *decompressor) Reset(r io.Reader) error    { return d.dec.Reset(r) }
 
-// Close releases the decoder's goroutines. zstd.Decoder.Close is safe to call
-// here even after a Reset(nil).
+// Close detaches the current input but keeps the decoder reusable. Connect pools
+// decompressors and reuses each instance: putDecompressor calls Close() then
+// Reset(http.NoBody), and a later getDecompressor calls Reset(body) on the SAME
+// instance. zstd.Decoder.Close() is terminal — after it, Reset returns
+// ErrDecoderClosed ("decoder used after Close") — so calling it here would poison
+// the pooled decoder and every reused upload would be rejected with
+// "get decompressor: decoder used after Close". Reset(nil) releases the reader
+// reference without killing the decoder.
 func (d *decompressor) Close() error {
-	d.dec.Close()
-	return nil
+	return d.dec.Reset(nil)
 }
