@@ -150,6 +150,20 @@ func TestNewHandlerValidation(t *testing.T) {
 	require.Error(t, err, "nil Tenant must error")
 }
 
+func TestExtraNavRendersInSidebar(t *testing.T) {
+	srv := newServer(t, Config{
+		Querier:  fakeQuerier{},
+		Tenant:   constTenant,
+		ExtraNav: []NavItem{{Label: "Account", Icon: "◉", Href: "/account"}},
+	})
+	code, body := getBody(t, srv.URL+"/")
+	require.Equal(t, http.StatusOK, code)
+	// The injected item renders after the core nav items.
+	assert.Contains(t, body, `href="/account"`, "injected nav href must render in the sidebar")
+	assert.Contains(t, body, "Account", "injected nav label must render")
+	assert.Contains(t, body, "/performance?win=", "core nav items must still render")
+}
+
 func TestCopyJSAssetServed(t *testing.T) {
 	srv := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant})
 

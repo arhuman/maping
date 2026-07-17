@@ -83,8 +83,9 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	webHandler, err := web.NewHandler(
-		buildWebConfig(d.querier, d.cp, d.memberAdmin, d.card, authLayer != nil, d.constTenant, d.baseURL, d.sessKey, log))
+	webCfg := buildWebConfig(d.querier, d.cp, d.memberAdmin, d.card, authLayer != nil, d.constTenant, d.baseURL, d.sessKey, log)
+	webCfg.ExtraNav = o.navItems
+	webHandler, err := web.NewHandler(webCfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}

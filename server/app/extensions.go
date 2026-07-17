@@ -86,6 +86,7 @@ type options struct {
 	loginInterceptor LoginInterceptorFactory
 	memberAdmin      MemberAdminFactory
 	publicHome       http.HandlerFunc
+	navItems         []NavItem
 }
 
 // Option configures Run.
@@ -146,6 +147,16 @@ func WithMemberAdmin(factory MemberAdminFactory) Option {
 // self-host/OSS surface serves no landing page).
 func WithPublicHome(home http.HandlerFunc) Option {
 	return func(o *options) { o.publicHome = home }
+}
+
+// WithNavItem adds one or more entries to the dashboard sidebar nav, after the core
+// items (Services, Performance, Setup). A composing build uses it to surface a page
+// it owns — e.g. an /account page — that the core cannot know about. The items are
+// display-only links (never marked active) and appear on every dashboard page. The
+// composing build is responsible for only injecting links to routes it actually
+// mounts (e.g. gating on the control plane), so the nav never points at a 404.
+func WithNavItem(items ...NavItem) Option {
+	return func(o *options) { o.navItems = append(o.navItems, items...) }
 }
 
 // mountExtensions applies each WithRoutes registrar onto the server mux after the

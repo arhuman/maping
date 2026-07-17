@@ -48,6 +48,7 @@ type Handler struct {
 	org        string           // sidebar identity chrome (display only).
 	user       string
 	role       string
+	extraNav   []navItem // extra sidebar entries injected by a composing build.
 	log        *slog.Logger
 	tpl        *template.Template
 }
@@ -77,6 +78,16 @@ type Config struct {
 	OrgName  string
 	UserName string
 	UserRole string
+	// ExtraNav are additional sidebar entries a composing build injects (via
+	// app.WithNavItem) — e.g. a link to an enterprise-owned page the core does not
+	// know about. They render after the core items and are never marked active.
+	ExtraNav []NavItem
+}
+
+// NavItem is an extra sidebar entry a composing build injects through
+// app.WithNavItem. Icon is a single display glyph matching the core nav style.
+type NavItem struct {
+	Label, Icon, Href string
 }
 
 // NewHandler builds the dashboard Handler. Querier and Tenant are required;
@@ -112,9 +123,23 @@ func NewHandler(cfg Config) (*Handler, error) {
 		org:        orDefault(cfg.OrgName, "mAPI-ng"),
 		user:       orDefault(cfg.UserName, "dev"),
 		role:       orDefault(cfg.UserRole, "admin"),
+		extraNav:   toNavItems(cfg.ExtraNav),
 		log:        log,
 		tpl:        tpl,
 	}, nil
+}
+
+// toNavItems converts the injected NavItems into the internal nav entries the
+// shell renders (never active, no badge).
+func toNavItems(items []NavItem) []navItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]navItem, len(items))
+	for i, it := range items {
+		out[i] = navItem{Label: it.Label, Icon: it.Icon, Href: it.Href}
+	}
+	return out
 }
 
 // orDefault returns v when non-empty, else def.
@@ -156,7 +181,7 @@ func (h *Handler) buildShell(r *http.Request, activeNav string, crumbs []crumb, 
 		Org:          h.org,
 		User:         h.user,
 		Role:         h.role,
-		Nav:          buildNav(activeNav, winKey),
+		Nav:          append(buildNav(activeNav, winKey), h.extraNav...),
 		Crumbs:       crumbs,
 		PageTitle:    title,
 		ShowControls: showControls,
