@@ -165,7 +165,8 @@ integration:
 ## local: start the full dev stack (server + ClickHouse + Postgres), host ports published
 local: $(ENV_FILE)
 	$(LOCAL_COMPOSE) up -d --build
-	@echo "Local stack up — dashboard http://localhost:$${MAPING_PORT:-8080}"
+	@set -a; [ -f $(ENV_FILE) ] && . ./$(ENV_FILE) >/dev/null 2>&1; set +a; \
+		echo "Local stack up — dashboard http://localhost:$${MAPING_PORT:-8080}"
 
 ## up: start the full production stack (only the server port published)
 up: $(ENV_FILE)
