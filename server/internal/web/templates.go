@@ -131,6 +131,28 @@ a.userbox:hover{background:rgba(255,255,255,.04);}
 .pulse .ping{animation:mp-pulse 2.4s ease-out infinite;}
 .fade{animation:mp-fade .4s ease both;}
 pre{margin:0;padding:16px 17px;font:500 12.5px/1.7 var(--mono);color:var(--txt-2);overflow-x:auto;}
+/* framework selector (onboarding wire-up card) — CSS-only, no JS: hidden radios
+   drive the visible snippet + active tab via :checked sibling selectors. */
+.fw-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+.fw-tabs{display:flex;gap:2px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel-2);overflow-x:auto;}
+.fw-tab{font:600 11.5px var(--mono);color:var(--txt-3);padding:5px 11px;border-radius:7px;cursor:pointer;white-space:nowrap;user-select:none;transition:color .12s,background .12s;}
+.fw-tab:hover{color:var(--txt-2);}
+.fw-pane{display:none;}
+#fw-gin:checked~.fw-tabs label[for=fw-gin],
+#fw-nethttp:checked~.fw-tabs label[for=fw-nethttp],
+#fw-echo:checked~.fw-tabs label[for=fw-echo],
+#fw-chi:checked~.fw-tabs label[for=fw-chi],
+#fw-beego:checked~.fw-tabs label[for=fw-beego]{color:var(--accent);background:rgba(180,241,74,.12);}
+#fw-gin:checked~.fw-panes .fw-pane[data-fw=gin],
+#fw-nethttp:checked~.fw-panes .fw-pane[data-fw=nethttp],
+#fw-echo:checked~.fw-panes .fw-pane[data-fw=echo],
+#fw-chi:checked~.fw-panes .fw-pane[data-fw=chi],
+#fw-beego:checked~.fw-panes .fw-pane[data-fw=beego]{display:block;}
+#fw-gin:focus-visible~.fw-tabs label[for=fw-gin],
+#fw-nethttp:focus-visible~.fw-tabs label[for=fw-nethttp],
+#fw-echo:focus-visible~.fw-tabs label[for=fw-echo],
+#fw-chi:focus-visible~.fw-tabs label[for=fw-chi],
+#fw-beego:focus-visible~.fw-tabs label[for=fw-beego]{outline:2px solid var(--accent);outline-offset:1px;}
   </style>
 {{end}}
 

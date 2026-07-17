@@ -351,8 +351,22 @@ func (h *Handler) renderOnboarding(w http.ResponseWriter, r *http.Request, tid t
 		// always incomplete: keep the <noscript> meta-refresh fallback so no-JS
 		// clients self-terminate onto the live overview the moment the first Summary
 		// lands. JS clients poll the fragment in place and reload on completion.
-		Refresh: true,
+		Refresh:   true,
+		Framework: selectedFramework(r),
 	})
+}
+
+// selectedFramework picks which wire-up snippet the onboarding card shows checked,
+// from the ?fw= query param, defaulting to gin. Bounding it to the known adapter
+// set keeps the template's checked-radio logic total: an unrecognized value would
+// leave every tab unchecked and, with the CSS-only switcher, hide all snippets.
+func selectedFramework(r *http.Request) string {
+	switch fw := r.URL.Query().Get("fw"); fw {
+	case "nethttp", "echo", "chi", "beego":
+		return fw
+	default:
+		return "gin"
+	}
 }
 
 // frozenFor reports the tenant's frozen state through the nil-safe FrozenFunc.

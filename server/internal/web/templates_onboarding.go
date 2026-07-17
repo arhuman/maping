@@ -38,11 +38,47 @@ const tplOnboardingHTML = `
     <div style="display:flex;flex-direction:column;gap:16px;min-width:0;">
       <div class="panel" style="overflow:hidden;">
         <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line);background:var(--panel-2);"><span style="font:700 11px var(--mono);color:var(--accent);">1</span><span style="font-size:12.5px;font-weight:600;">Wire the middleware</span><span style="margin-left:auto;font:500 10.5px var(--mono);color:var(--txt-3);">main.go</span></div>
-        <pre>rec := maping.NewRecorder(
+        <input class="fw-radio" type="radio" name="fw" id="fw-gin"{{if eq .Framework "gin"}} checked{{end}}>
+        <input class="fw-radio" type="radio" name="fw" id="fw-nethttp"{{if eq .Framework "nethttp"}} checked{{end}}>
+        <input class="fw-radio" type="radio" name="fw" id="fw-echo"{{if eq .Framework "echo"}} checked{{end}}>
+        <input class="fw-radio" type="radio" name="fw" id="fw-chi"{{if eq .Framework "chi"}} checked{{end}}>
+        <input class="fw-radio" type="radio" name="fw" id="fw-beego"{{if eq .Framework "beego"}} checked{{end}}>
+        <div class="fw-tabs">
+          <label class="fw-tab" for="fw-gin">gin</label>
+          <label class="fw-tab" for="fw-nethttp">net/http</label>
+          <label class="fw-tab" for="fw-echo">echo</label>
+          <label class="fw-tab" for="fw-chi">chi</label>
+          <label class="fw-tab" for="fw-beego">beego</label>
+        </div>
+        <div class="fw-panes">
+          <pre class="fw-pane" data-fw="gin">rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 r.Use(mapinggin.MiddlewareWithRecorder(rec)) // above Recovery
 r.Use(gin.Recovery())</pre>
+          <pre class="fw-pane" data-fw="nethttp">rec := maping.NewRecorder(
+    maping.WithService("checkout-api"),
+)
+mux := http.NewServeMux()
+mux.HandleFunc("GET /orders/{id}", ordersHandler)
+// wrap the mux; the ServeMux pattern is the route template
+handler := mapinghttp.MiddlewareWithRecorder(rec)(mux)</pre>
+          <pre class="fw-pane" data-fw="echo">rec := maping.NewRecorder(
+    maping.WithService("checkout-api"),
+)
+e.Use(mapingecho.MiddlewareWithRecorder(rec)) // before Recover
+e.Use(middleware.Recover())</pre>
+          <pre class="fw-pane" data-fw="chi">rec := maping.NewRecorder(
+    maping.WithService("checkout-api"),
+)
+r.Use(mapingchi.MiddlewareWithRecorder(rec)) // above Recoverer
+r.Use(middleware.Recoverer)</pre>
+          <pre class="fw-pane" data-fw="beego">rec := maping.NewRecorder(
+    maping.WithService("checkout-api"),
+)
+// filter runs after routing; panic recovery is inner, so no ordering needed
+web.InsertFilterChain("/*", mapingbeego.FilterWithRecorder(rec))</pre>
+        </div>
       </div>
       <div class="panel" style="overflow:hidden;">
         <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line);background:var(--panel-2);"><span style="font:700 11px var(--mono);color:var(--accent);">2</span><span style="font-size:12.5px;font-weight:600;">Activate</span></div>

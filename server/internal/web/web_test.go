@@ -250,6 +250,33 @@ func TestOnboardingFrozenWarning(t *testing.T) {
 	assert.Contains(t, body, "Cardinality frozen")
 }
 
+func TestOnboardingFrameworkSelector(t *testing.T) {
+	srv := newServer(t, Config{Querier: fakeQuerier{hasData: false}, Tenant: constTenant})
+
+	// Default view: every adapter's wire-up snippet is rendered, all five tabs are
+	// present, and gin is the checked default.
+	code, body := getBody(t, srv.URL+"/")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "mapinggin.MiddlewareWithRecorder")
+	assert.Contains(t, body, "mapinghttp.MiddlewareWithRecorder")
+	assert.Contains(t, body, "mapingecho.MiddlewareWithRecorder")
+	assert.Contains(t, body, "mapingchi.MiddlewareWithRecorder")
+	assert.Contains(t, body, "mapingbeego.FilterWithRecorder")
+	assert.Contains(t, body, `>net/http</label>`)
+	assert.Contains(t, body, `>beego</label>`)
+	assert.Contains(t, body, `id="fw-gin" checked`)
+
+	// ?fw= pre-checks the matching radio (deep-link into a framework).
+	_, chiBody := getBody(t, srv.URL+"/?fw=chi")
+	assert.Contains(t, chiBody, `id="fw-chi" checked`)
+	assert.NotContains(t, chiBody, `id="fw-gin" checked`)
+
+	// An unknown framework falls back to gin so the CSS switcher never hides every
+	// snippet.
+	_, badBody := getBody(t, srv.URL+"/?fw=bogus")
+	assert.Contains(t, badBody, `id="fw-gin" checked`)
+}
+
 func TestOverviewQueryError(t *testing.T) {
 	srv := newServer(t, Config{
 		Querier: fakeQuerier{hasData: true, servicesErr: errors.New("boom")},

@@ -95,7 +95,8 @@ type onboardingPage struct {
 	Shell     Shell
 	Handshake handshakeView
 	Frozen    bool
-	Refresh   bool // gate the <noscript> meta-refresh fallback (onboarding incomplete)
+	Refresh   bool   // gate the <noscript> meta-refresh fallback (onboarding incomplete)
+	Framework string // which wire-up snippet the selector card shows checked (?fw=, default "gin")
 }
 
 // performancePage feeds the performance/architecture page. The volume figures
