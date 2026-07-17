@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.47.0
-	github.com/arhuman/maping/proto v0.2.0
+	github.com/arhuman/maping/proto v0.3.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/oauth2 v0.36.0
