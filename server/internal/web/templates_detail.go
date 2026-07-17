@@ -11,6 +11,7 @@ const tplDetailHTML = `
   <div class="panel" style="padding:13px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px;">
     <span class="dot {{.Verdict.DotClass}}" style="flex-shrink:0;"></span>
     <span style="font:700 14px var(--ui);flex-shrink:0;">{{.Verdict.Headline}}</span>
+    {{if .Verdict.Qualifier}}<span style="font:600 10.5px var(--mono);color:var(--txt-3);border:1px solid var(--line);border-radius:6px;padding:2px 7px;flex-shrink:0;letter-spacing:.4px;">{{.Verdict.Qualifier}}</span>{{end}}
     <span style="font:500 12.5px var(--mono);color:var(--txt-3);">{{.Verdict.Sentence}}</span>
   </div>
   <div class="kpistrip" style="grid-template-columns:repeat(5,1fr);">{{range .Stats}}{{template "kpi" .}}{{end}}</div>

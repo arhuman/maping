@@ -44,7 +44,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 
 	dv := toDetailView(detail)
 	winSec := to.Sub(from).Seconds()
-	verdict := computeVerdict(dv, p.baseline)
+	verdict := computeVerdict(dv, p.baseline, winSec)
 	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service, Href: withWin("/services/"+service, winKey)}, {Label: method + " " + route}}
 	h.render(w, "detail", detailData{
 		Shell:           h.buildShell(r, "overview", crumbs, method+" "+route, true, winKey),

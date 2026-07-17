@@ -11,15 +11,17 @@ import (
 
 // verdictView is the server-computed endpoint-detail health verdict shown as a
 // banner above the KPI strip. Level is one of Healthy/Degraded/Critical/Unknown;
-// Headline equals Level; DotClass reuses the shared dot palette; Sentence is a
-// single factual line; Open drives auto-expanding the Diagnostic details
-// disclosure when the endpoint is not Healthy.
+// Headline equals Level; DotClass reuses the shared dot palette; Qualifier is an
+// optional blast-radius note (e.g. "low traffic") that tempers a non-Healthy read
+// without changing the metric-driven severity; Sentence is a single factual line;
+// Open drives auto-expanding the Diagnostic details disclosure when not Healthy.
 type verdictView struct {
-	Level    string
-	DotClass string
-	Headline string
-	Sentence string
-	Open     bool
+	Level     string
+	DotClass  string
+	Headline  string
+	Qualifier string
+	Sentence  string
+	Open      bool
 }
 
 // severity is the per-component verdict contribution: none, degraded, or
@@ -46,39 +48,48 @@ const (
 // latency-vs-baseline rule is skipped rather than fabricated.
 const minBaselineBuckets = 30
 
-// computeVerdict grades an endpoint window from its RED headline and a lagged
-// trailing baseline series. Percentiles are in seconds. The low-traffic gate is
-// checked first so a quiet window never renders a falsely reassuring "Healthy".
-// MAD-based robust scale is intentionally deferred to the later diagnosis-engine
-// slice; v1 uses the median of the baseline p95 buckets only.
-func computeVerdict(d detailView, baseline []storage.TimePoint) verdictView {
+// minVerdictSamples is the request count a window needs before its percentile-based
+// rules (latency-vs-baseline, spread) are trusted. Below it those rules are skipped,
+// and — absent a confident error signal — the verdict is Unknown rather than a shaky
+// Healthy. Errors are judged separately and are NOT subject to this gate.
+const minVerdictSamples = 20
+
+// lowTrafficRate (requests/second) is the blast-radius floor below which a non-Healthy
+// verdict is tagged "low traffic": genuinely broken, but not a live high-volume
+// incident. Severity itself stays metric-driven; this only tempers the read. A v1
+// default meant to be tuned.
+const lowTrafficRate = 0.05
+
+// computeVerdict grades an endpoint window from its RED headline, a lagged trailing
+// baseline series, and the window length (for the traffic-rate qualifier).
+// Percentiles are in seconds. Confidence is handled per metric: errors are a
+// confident fact judged at any volume, while the percentile rules (latency, spread)
+// are skipped below minVerdictSamples. A window too small to judge latency and with
+// no error signal is Unknown, never a shaky Healthy. Severity stays metric-driven; a
+// broken but near-idle endpoint carries a "low traffic" qualifier rather than a
+// discounted level. MAD-based robust scale is deferred to the diagnosis-engine slice.
+func computeVerdict(d detailView, baseline []storage.TimePoint, winSeconds float64) verdictView {
 	errors := int(math.Round(d.ErrorRate * float64(d.Count)))
 
-	if d.Count < 20 {
-		return verdictView{
-			Level:    "Unknown",
-			DotClass: "dot-muted",
-			Headline: "Unknown",
-			Sentence: "Insufficient traffic (n=" + strconv.FormatUint(d.Count, 10) + ") — no verdict this window.",
+	// Errors are judged on their own error-count floor: a handful of real failures
+	// is a confident fact regardless of total volume, so error severity is NOT gated
+	// by the sample-size check that guards the noisy percentile rules below.
+	errSev := errorSeverity(errors, d.ErrorRate)
+
+	// Latency and spread are percentile-based and unreliable on small samples, so
+	// they are graded only once the window carries enough requests.
+	enoughSamples := d.Count >= minVerdictSamples
+	spread, latRatio := 0.0, 0.0
+	spreadSev, latSev := sevNone, sevNone
+	if enoughSamples {
+		if d.P50 > 0 {
+			spread = d.P95 / d.P50
 		}
-	}
-
-	baselineP95, haveBaseline := baselineMedianP95(baseline)
-
-	// spread is the p95/p50 tail ratio; undefined (and so non-firing) when p50 is
-	// non-positive.
-	spread := 0.0
-	if d.P50 > 0 {
-		spread = d.P95 / d.P50
-	}
-
-	errSev := errorSeverity(errors, d.Count, d.ErrorRate)
-	spreadSev := spreadSeverity(spread, d.P95, d.Count)
-	latSev := sevNone
-	latRatio := 0.0
-	if haveBaseline && baselineP95 > 0 {
-		latRatio = d.P95 / baselineP95
-		latSev = latencySeverity(d.P95, latRatio)
+		spreadSev = spreadSeverity(spread, d.P95, d.Count)
+		if baselineP95, ok := baselineMedianP95(baseline); ok && baselineP95 > 0 {
+			latRatio = d.P95 / baselineP95
+			latSev = latencySeverity(d.P95, latRatio)
+		}
 	}
 
 	level := errSev
@@ -89,7 +100,21 @@ func computeVerdict(d detailView, baseline []storage.TimePoint) verdictView {
 		level = latSev
 	}
 
+	// Blast-radius qualifier: a broken but near-idle endpoint is not a live incident.
+	qualifier := ""
+	if winSeconds > 0 && float64(d.Count)/winSeconds < lowTrafficRate {
+		qualifier = "low traffic"
+	}
+
 	if level == sevNone {
+		if !enoughSamples {
+			return verdictView{
+				Level:    "Unknown",
+				DotClass: "dot-muted",
+				Headline: "Unknown",
+				Sentence: "Insufficient traffic (n=" + strconv.FormatUint(d.Count, 10) + ") — no verdict this window.",
+			}
+		}
 		return verdictView{
 			Level:    "Healthy",
 			DotClass: "dot-ok",
@@ -98,27 +123,30 @@ func computeVerdict(d detailView, baseline []storage.TimePoint) verdictView {
 		}
 	}
 
-	name := "Degraded"
-	dot := "dot-warn"
+	name, dot := "Degraded", "dot-warn"
 	if level == sevCritical {
 		name, dot = "Critical", "dot-err"
 	}
 	return verdictView{
-		Level:    name,
-		DotClass: dot,
-		Headline: name,
-		Sentence: problemSentence(d, errors, spread, latRatio, errSev, spreadSev, latSev),
-		Open:     true,
+		Level:     name,
+		DotClass:  dot,
+		Headline:  name,
+		Qualifier: qualifier,
+		Sentence:  problemSentence(d, errors, spread, latRatio, errSev, spreadSev, latSev),
+		Open:      true,
 	}
 }
 
-// errorSeverity grades the error-rate component. Absolute counts are AND-ed with
-// the rate so a handful of errors on tiny traffic never trips a verdict.
-func errorSeverity(errors int, count uint64, rate float64) severity {
+// errorSeverity grades the error-rate component. The absolute error-count floor
+// (>=5 / >=10) is AND-ed with the rate so a couple of errors never trips a verdict;
+// the low-traffic gate in computeVerdict (count < 20 -> Unknown) already screens out
+// windows too small to judge. There is deliberately no total-request-count floor
+// here: a 100% error rate must read Critical, not Healthy, on modest traffic.
+func errorSeverity(errors int, rate float64) severity {
 	switch {
-	case errors >= 10 && count >= 100 && rate >= 0.05:
+	case errors >= 10 && rate >= 0.05:
 		return sevCritical
-	case errors >= 5 && count >= 100 && rate >= 0.01:
+	case errors >= 5 && rate >= 0.01:
 		return sevDegraded
 	default:
 		return sevNone
