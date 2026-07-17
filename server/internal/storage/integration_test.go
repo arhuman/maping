@@ -526,3 +526,283 @@ func TestExemplarsForEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, all, 2)
 }
+
+// setupInstanceWindows recreates the instance_windows table (migration 0003) in
+// the test database so USE-gauge runs are repeatable. Mirrors setupSchema.
+func setupInstanceWindows(t *testing.T, conn driver.Conn) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, conn.Exec(ctx, `DROP TABLE IF EXISTS instance_windows`))
+	ddl, err := os.ReadFile("migrations/clickhouse/0003_instance_windows.sql")
+	require.NoError(t, err)
+	for _, stmt := range splitStatements(string(ddl)) {
+		require.NoError(t, conn.Exec(ctx, stmt))
+	}
+}
+
+// TestPerformanceStatsIntegration asserts PerformanceStats measures the tenant's
+// represented requests (sum of per-summary count) and shipped summary-row count
+// from the raw tier, isolated from other tenants, with a non-zero measured disk
+// estimate.
+func TestPerformanceStatsIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("perf-tenant")
+
+	// Three DISTINCT series (different routes) so count() is a stable 3 regardless
+	// of background merges; represented requests sum to 10+5+4 = 19.
+	for _, r := range []struct {
+		route string
+		count uint64
+	}{{"/a", 10}, {"/b", 5}, {"/c", 4}} {
+		require.NoError(t, w.Enqueue(NewRow(
+			tid, "svc", "inst", "GET", r.route, "STATUS_CLASS_2XX",
+			now, now.Add(5*time.Second), r.count, 0, 0, 0,
+			map[int32]uint64{10: r.count}, map[uint32]uint64{200: r.count},
+			"", "", "", "", time.Time{},
+			0, nil,
+			nil, nil,
+			0,
+		)))
+	}
+	// A different tenant must not bleed into perf-tenant's figures.
+	require.NoError(t, w.Enqueue(NewRow(
+		tenant.MustParse("other-perf-tenant"), "svc", "inst", "GET", "/a", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 999, 0, 0, 0,
+		map[int32]uint64{10: 999}, map[uint32]uint64{200: 999},
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		0,
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	stat, err := PerformanceStats(context.Background(), conn, tid, from, to)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19), stat.Requests, "sum of per-summary counts, this tenant only")
+	require.Equal(t, uint64(3), stat.Summaries, "three shipped summary rows")
+	require.Positive(t, stat.SummaryDiskBytes, "disk estimate is measured from system.parts or the fallback")
+}
+
+// TestDownstreamForEndpointIntegration asserts DownstreamForEndpoint sums the
+// request time and downstream-wait time for one endpoint across same-key rows
+// (the SimpleAggregateFunction(sum) columns merge), so self-vs-downstream can be
+// split.
+func TestDownstreamForEndpointIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("ds-tenant")
+
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 10, 1000, 0, 0,
+		map[int32]uint64{10: 10}, map[uint32]uint64{200: 10},
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		400,
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 5, 500, 0, 0,
+		map[int32]uint64{20: 5}, map[uint32]uint64{200: 5},
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, nil,
+		100,
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	ds, err := DownstreamForEndpoint(context.Background(), conn, tid, "svc", "GET", "/x", from, to)
+	require.NoError(t, err)
+	require.Equal(t, uint64(15), ds.Count)
+	require.Equal(t, uint64(1500), ds.SumDurationNs)
+	require.Equal(t, uint64(500), ds.SumDownstreamNs, "downstream wait merges via sum; self time = 1000")
+}
+
+// TestErrorClassesForEndpointIntegration asserts ErrorClassesForEndpoint merges
+// the per-row error_classes maps via sumMap, orders labels by count descending,
+// and stays isolated from other tenants.
+func TestErrorClassesForEndpointIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("ec-tenant")
+
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_5XX",
+		now, now.Add(5*time.Second), 10, 0, 0, 0,
+		map[int32]uint64{10: 10}, map[uint32]uint64{500: 10},
+		"", "", "", "", time.Time{},
+		0, nil,
+		map[string]uint64{"DB_POOL_EXHAUSTED": 7, "UPSTREAM_TIMEOUT": 3}, nil,
+		0,
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_5XX",
+		now, now.Add(5*time.Second), 2, 0, 0, 0,
+		map[int32]uint64{10: 2}, map[uint32]uint64{500: 2},
+		"", "", "", "", time.Time{},
+		0, nil,
+		map[string]uint64{"DB_POOL_EXHAUSTED": 2}, nil,
+		0,
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tenant.MustParse("other-ec-tenant"), "svc", "inst", "GET", "/x", "STATUS_CLASS_5XX",
+		now, now.Add(5*time.Second), 1, 0, 0, 0,
+		map[int32]uint64{10: 1}, map[uint32]uint64{500: 1},
+		"", "", "", "", time.Time{},
+		0, nil,
+		map[string]uint64{"OTHER_TENANT_ERR": 50}, nil,
+		0,
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	classes, err := ErrorClassesForEndpoint(context.Background(), conn, tid, "svc", "GET", "/x", from, to)
+	require.NoError(t, err)
+	require.Len(t, classes, 2, "two labels for this tenant, isolated from the other tenant")
+	// Ordered by count DESC: DB_POOL_EXHAUSTED (7+2=9) then UPSTREAM_TIMEOUT (3).
+	require.Equal(t, "DB_POOL_EXHAUSTED", classes[0].Class)
+	require.Equal(t, uint64(9), classes[0].Count)
+	require.Equal(t, "UPSTREAM_TIMEOUT", classes[1].Class)
+	require.Equal(t, uint64(3), classes[1].Count)
+}
+
+// TestNoStatusReasonsForEndpointIntegration asserts NoStatusReasonsForEndpoint
+// merges the per-row no_status_reasons maps via sumMap and orders by reason.
+func TestNoStatusReasonsForEndpointIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("ns-tenant")
+
+	// no_status_reasons keyed by the proto enum value; two same-key rows merge via sumMap.
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 6, 0, 0, 0,
+		map[int32]uint64{10: 6}, nil,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, map[uint32]uint64{1: 4, 2: 2},
+		0,
+	)))
+	require.NoError(t, w.Enqueue(NewRow(
+		tid, "svc", "inst", "GET", "/x", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 3, 0, 0, 0,
+		map[int32]uint64{10: 3}, nil,
+		"", "", "", "", time.Time{},
+		0, nil,
+		nil, map[uint32]uint64{2: 3},
+		0,
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	reasons, err := NoStatusReasonsForEndpoint(context.Background(), conn, tid, "svc", "GET", "/x", from, to)
+	require.NoError(t, err)
+	require.Len(t, reasons, 2)
+	// Ordered by reason ASC: reason 1 (count 4), reason 2 (2+3=5).
+	require.Equal(t, uint8(1), reasons[0].Reason)
+	require.Equal(t, uint64(4), reasons[0].Count)
+	require.Equal(t, uint8(2), reasons[1].Reason)
+	require.Equal(t, uint64(5), reasons[1].Count)
+}
+
+// TestInstanceResourcesForServiceIntegration exercises the EnqueueInstanceWindow
+// write path and InstanceResourcesForService read against live ClickHouse: per
+// instance, the delta counters (cpu, gc pause) sum and the point-in-time gauges
+// (rss, heap, goroutines) take the window peak, ordered by instance and isolated
+// per tenant.
+func TestInstanceResourcesForServiceIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupInstanceWindows(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("iw-tenant")
+
+	// pod-a reports two windows: cpu/gc are per-window deltas (sum), rss/heap/
+	// goroutines are gauges (window peak).
+	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
+		Tenant: tid, Service: "svc", Instance: "pod-a",
+		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
+		CPUNs: 100, RSSBytes: 10, HeapAllocBytes: 100, GCPauseNs: 1, Goroutines: 5,
+	}))
+	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
+		Tenant: tid, Service: "svc", Instance: "pod-a",
+		WindowStart: now.Add(10 * time.Second), WindowEnd: now.Add(20 * time.Second),
+		CPUNs: 200, RSSBytes: 20, HeapAllocBytes: 50, GCPauseNs: 2, Goroutines: 9,
+	}))
+	// pod-b reports one window.
+	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
+		Tenant: tid, Service: "svc", Instance: "pod-b",
+		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
+		CPUNs: 50, RSSBytes: 7, HeapAllocBytes: 30, GCPauseNs: 4, Goroutines: 3,
+	}))
+	// Another tenant's gauges must stay isolated.
+	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
+		Tenant: tenant.MustParse("other-iw-tenant"), Service: "svc", Instance: "pod-a",
+		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
+		CPUNs: 9999, RSSBytes: 9999, HeapAllocBytes: 9999, GCPauseNs: 9999, Goroutines: 9999,
+	}))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	from, to := now.Add(-time.Minute), now.Add(time.Minute)
+	res, err := InstanceResourcesForService(context.Background(), conn, tid, "svc", from, to)
+	require.NoError(t, err)
+	require.Len(t, res, 2, "two instances for this tenant, ordered by instance, isolated from the other tenant")
+
+	// pod-a: cpu 100+200=300, gc 1+2=3 (deltas sum); rss max 20, heap max 100, goroutines max 9.
+	require.Equal(t, "pod-a", res[0].Instance)
+	require.Equal(t, uint64(300), res[0].CPUNs)
+	require.Equal(t, uint64(3), res[0].GCPauseNs)
+	require.Equal(t, uint64(20), res[0].RSSBytes)
+	require.Equal(t, uint64(100), res[0].HeapAllocBytes)
+	require.Equal(t, uint64(9), res[0].Goroutines)
+
+	require.Equal(t, "pod-b", res[1].Instance)
+	require.Equal(t, uint64(50), res[1].CPUNs)
+}
