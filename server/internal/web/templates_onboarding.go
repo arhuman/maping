@@ -51,29 +51,54 @@ const tplOnboardingHTML = `
           <label class="fw-tab" for="fw-beego">beego</label>
         </div>
         <div class="fw-panes">
-          <pre class="fw-pane" data-fw="gin">rec := maping.NewRecorder(
+          <pre class="fw-pane" data-fw="gin">import (
+    maping "github.com/arhuman/maping/client"
+    mapinggin "github.com/arhuman/maping/client/gin"
+)
+
+rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 r.Use(mapinggin.MiddlewareWithRecorder(rec)) // above Recovery
 r.Use(gin.Recovery())</pre>
-          <pre class="fw-pane" data-fw="nethttp">rec := maping.NewRecorder(
+          <pre class="fw-pane" data-fw="nethttp">import (
+    maping "github.com/arhuman/maping/client"
+    mapinghttp "github.com/arhuman/maping/client/nethttp"
+)
+
+rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 mux := http.NewServeMux()
 mux.HandleFunc("GET /orders/{id}", ordersHandler)
 // wrap the mux; the ServeMux pattern is the route template
 handler := mapinghttp.MiddlewareWithRecorder(rec)(mux)</pre>
-          <pre class="fw-pane" data-fw="echo">rec := maping.NewRecorder(
+          <pre class="fw-pane" data-fw="echo">import (
+    maping "github.com/arhuman/maping/client"
+    mapingecho "github.com/arhuman/maping/client/echo"
+)
+
+rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 e.Use(mapingecho.MiddlewareWithRecorder(rec)) // before Recover
 e.Use(middleware.Recover())</pre>
-          <pre class="fw-pane" data-fw="chi">rec := maping.NewRecorder(
+          <pre class="fw-pane" data-fw="chi">import (
+    maping "github.com/arhuman/maping/client"
+    mapingchi "github.com/arhuman/maping/client/chi"
+)
+
+rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 r.Use(mapingchi.MiddlewareWithRecorder(rec)) // above Recoverer
 r.Use(middleware.Recoverer)</pre>
-          <pre class="fw-pane" data-fw="beego">rec := maping.NewRecorder(
+          <pre class="fw-pane" data-fw="beego">import (
+    maping "github.com/arhuman/maping/client"
+    mapingbeego "github.com/arhuman/maping/client/beego"
+)
+
+rec := maping.NewRecorder(
     maping.WithService("checkout-api"),
 )
 // filter runs after routing; panic recovery is inner, so no ordering needed
