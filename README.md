@@ -131,6 +131,11 @@ Design decisions are recorded in [`docs/adr/`](docs/adr/):
 | [0009](docs/adr/0009-setup-form-csrf-synchronizer-token.md) | Setup form CSRF: stateless HMAC synchronizer token |
 | [0010](docs/adr/0010-tenant-scoped-queries.md) | Tenant-scoped data-plane access (un-scoped query unrepresentable) |
 | [0011](docs/adr/0011-ci-quality-gate.md) | CI quality gate: run the Makefile targets on push/PR |
+| [0012](docs/adr/0012-aggregating-schema-instance-sort-key.md) | Summaries aggregate-state columns and an instance/method sort key |
+| [0013](docs/adr/0013-deploy-version-dimension.md) | Deploy identity (version / env / region) as a stored dimension |
+| [0014](docs/adr/0014-exemplars-and-max-latency.md) | Exemplars: bounded request breadcrumbs from an aggregate to a trace |
+| [0015](docs/adr/0015-use-gauges-instance-windows.md) | USE gauges: per-instance saturation as a separate stream |
+| [0016](docs/adr/0016-composition-seams.md) | Composition seams: out-of-tree features via app.Run options |
 
 
 ---
