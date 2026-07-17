@@ -1,9 +1,9 @@
 connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
 connectrpc.com/connect v1.20.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
-github.com/arhuman/maping/client v0.3.0 h1:rTtEAKX1IWvepAUeRTTNd49hHpN9TddEAWSBuiGxx8A=
-github.com/arhuman/maping/client v0.3.0/go.mod h1:sNWbNh5dGJBcSAVW70E/4WRAbOGDblzt31KqpneVfsU=
-github.com/arhuman/maping/proto v0.3.0 h1:QOLLhvSFmiwaAEboMpH392saRmvr01DpRjRddq1QLSg=
-github.com/arhuman/maping/proto v0.3.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
+github.com/arhuman/maping/client v0.4.0 h1:EhgfiG7H5ejo4c0x20G2J0L+3TOKBUWNUWEU6WcoIsI=
+github.com/arhuman/maping/client v0.4.0/go.mod h1:/ZuzCGYGqzrogzq6kLEN+a7m4YijF/bLRYdgqXPyUYE=
+github.com/arhuman/maping/proto v0.4.0 h1:mu8K/MltU4Chti9jWOhCdK88MPgR0iWCZI+sZkla0g8=
+github.com/arhuman/maping/proto v0.4.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
 github.com/bytedance/gopkg v0.1.3 h1:TPBSwH8RsouGCBcMBktLt1AymVo2TVsBVCY4b6TnZ/M=
 github.com/bytedance/gopkg v0.1.3/go.mod h1:576VvJ+eJgyCzdjS+c4+77QF3p7ubbtiKARP3TxducM=
 github.com/bytedance/sonic v1.15.0 h1:/PXeWFaR5ElNcVE84U0dOHjiMHQOwNIx3K4ymzh/uSE=
