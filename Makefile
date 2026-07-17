@@ -38,6 +38,10 @@ MODULES := proto client client/gin client/nethttp client/echo client/chi client/
 # release`. example/ is not published.
 RELEASE_MODULES := proto client server client/gin client/nethttp client/echo client/chi client/beego
 
+# Client framework adapters (client/<name> modules), released as client/<name>/vX.Y.Z
+# after client is tagged, since each imports the core client at that version.
+ADAPTERS := gin nethttp echo chi beego
+
 # Release version for `make release VERSION=vX.Y.Z` (path-prefixed tags per module).
 VERSION ?=
 
@@ -187,14 +191,17 @@ release: confirm
 	git commit -am "chore(release): client & server $(VERSION) on proto@$(VERSION)"
 	git tag client/$(VERSION) && git tag server/$(VERSION)
 	git push origin client/$(VERSION) server/$(VERSION)
-	@echo "== 3/3 client/gin: pin client@$(VERSION) + proto@$(VERSION), drop local replaces =="
-	cd client/gin && go mod edit \
-		-dropreplace=github.com/arhuman/maping/client -dropreplace=github.com/arhuman/maping/proto \
-		-require=github.com/arhuman/maping/client@$(VERSION) -require=github.com/arhuman/maping/proto@$(VERSION) && go mod tidy
-	git commit -am "chore(release): client/gin $(VERSION)"
-	git tag client/gin/$(VERSION)
-	git push origin client/gin/$(VERSION)
-	@echo "released: proto/$(VERSION) client/$(VERSION) server/$(VERSION) client/gin/$(VERSION)"
+	@echo "== 3/3 client adapters: pin client@$(VERSION) + proto@$(VERSION), drop local replaces =="
+	@for a in $(ADAPTERS); do \
+		echo "-- client/$$a"; \
+		(cd client/$$a && go mod edit \
+			-dropreplace=github.com/arhuman/maping/client -dropreplace=github.com/arhuman/maping/proto \
+			-require=github.com/arhuman/maping/client@$(VERSION) -require=github.com/arhuman/maping/proto@$(VERSION) && go mod tidy) || exit 1; \
+	done
+	git commit -am "chore(release): client adapters $(VERSION)"
+	@for a in $(ADAPTERS); do git tag client/$$a/$(VERSION); done
+	@for a in $(ADAPTERS); do git push origin client/$$a/$(VERSION); done
+	@echo "released: proto/$(VERSION) client/$(VERSION) server/$(VERSION)$(foreach a,$(ADAPTERS), client/$(a)/$(VERSION))"
 	@echo "verify as a consumer: (cd /tmp && GOWORK=off go get github.com/arhuman/maping/client@$(VERSION))"
 
 ## logs: follow logs of a service (make logs service=clickhouse)
