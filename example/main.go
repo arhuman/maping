@@ -31,6 +31,7 @@ import (
 
 	maping "github.com/arhuman/maping/client"
 	mapinggin "github.com/arhuman/maping/client/gin"
+	"github.com/arhuman/maping/example/faults"
 )
 
 // downstreamClient wraps the default transport in maping.NewRoundTripper, so the
@@ -103,6 +104,12 @@ func main() {
 		time.Sleep(40 * time.Millisecond)
 		c.JSON(http.StatusOK, gin.H{"slept": true})
 	})
+
+	// The /fault/* diagnostic test-bed: one deliberately misbehaving endpoint per
+	// diagnostic dimension, so the dashboard's verdicts can be checked against real
+	// runtime signals. Intensity knobs are query params (e.g. /fault/busy?ms=50);
+	// /fault/reset clears the stateful ones. See package faults.
+	faults.Register(r)
 
 	srv := &http.Server{Addr: ":9090", Handler: r, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
