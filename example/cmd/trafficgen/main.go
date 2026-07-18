@@ -8,6 +8,11 @@
 // GEN_FAULT=flaky. One fault at a time keeps the process-global signals (CPU
 // ramp, goroutine leak) legible. GEN_FAULT_PARAMS appends intensity knobs, e.g.
 // GEN_FAULT=flaky GEN_FAULT_PARAMS=pct=40.
+//
+// Set GEN_ROUNDS=N for a one-shot sweep instead of the continuous generator: it
+// hits EVERY endpoint (healthy routes plus the whole /fault/* catalog) N times,
+// flushes, and exits. Useful to populate the dashboard with one summary per
+// endpoint, e.g. GEN_ROUNDS=10.
 package main
 
 import (
@@ -17,6 +22,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -63,6 +69,22 @@ func main() {
 	defer app.Close()
 	cl := app.Client()
 
+	// do issues one request and drains the body, ignoring transport errors (the
+	// point is to exercise the middleware, not to assert responses).
+	do := func(m, p string) {
+		if m == "POST" {
+			resp, err := cl.Post(app.URL+p, "text/plain", nil)
+			if err == nil {
+				resp.Body.Close()
+			}
+			return
+		}
+		resp, err := cl.Get(app.URL + p)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+
 	type ep struct {
 		m, p string
 		w    int
@@ -70,6 +92,41 @@ func main() {
 	eps := []ep{{"GET", "/healthz", 6}, {"GET", "/", 4}, {"GET", "/login", 3}, {"GET", "/dashboard", 5},
 		{"GET", "/goals", 3}, {"GET", "/projects/491", 4}, {"GET", "/profile/work-style/keystone", 2},
 		{"POST", "/form/submit/login", 2}, {"GET", "/api/v1/missing", 1}, {"GET", "/api/v1/boom", 1}}
+
+	// GEN_ROUNDS: one-shot sweep over every endpoint N times, then flush and exit.
+	// Covers the healthy routes plus the full /fault/* catalog (reset excluded — it
+	// is a control endpoint that would clear the stateful faults mid-sweep).
+	if rs := os.Getenv("GEN_ROUNDS"); rs != "" {
+		rounds, err := strconv.Atoi(rs)
+		if err != nil || rounds < 1 {
+			rounds = 1
+		}
+		sweep := make([][2]string, 0, len(eps)+16)
+		for _, e := range eps {
+			sweep = append(sweep, [2]string{e.m, e.p})
+		}
+		for _, fp := range []string{
+			"/fault/busy?ms=25", "/fault/rampcpu?step=2", "/fault/sometimesbusy?n=10&ms=50",
+			"/fault/creep?step=3", "/fault/jitter?min=1&max=100", "/fault/flaky?pct=30",
+			"/fault/throttle?pct=100", "/fault/timeout?ms=5", "/fault/panic",
+			"/fault/goroutineleak?n=1", "/fault/downstream?ms=40", "/fault/boom",
+			"/fault/leak?kb=256", "/fault/spike?mb=32", "/fault/churn?n=100000&sz=32",
+			"/fault/bloat?mb=8&count=2",
+		} {
+			sweep = append(sweep, [2]string{"GET", fp})
+		}
+		log.Printf("sweeping %d endpoints x %d rounds", len(sweep), rounds)
+		for i := 0; i < rounds; i++ {
+			for _, e := range sweep {
+				do(e[0], e[1])
+			}
+		}
+		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err = rec.Shutdown(sctx)
+		cancel()
+		log.Printf("sweep complete (%d endpoints x %d rounds); flush err: %v", len(sweep), rounds, err)
+		return
+	}
 
 	// GEN_FAULT selects one fault to drive alongside the healthy baseline. It is
 	// weighted heavily so the anomaly is unmistakable on the dashboard.
@@ -103,17 +160,7 @@ func main() {
 			return
 		case <-ticker.C:
 			e := bag[rng.Intn(len(bag))]
-			if e.m == "POST" {
-				resp, err := cl.Post(app.URL+e.p, "text/plain", nil)
-				if err == nil {
-					resp.Body.Close()
-				}
-			} else {
-				resp, err := cl.Get(app.URL + e.p)
-				if err == nil {
-					resp.Body.Close()
-				}
-			}
+			do(e.m, e.p)
 		}
 	}
 }
