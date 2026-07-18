@@ -15,10 +15,9 @@
 // property of the process, shared by every endpoint it serves. Drive one fault
 // at a time (or one per instance) for a clean signal.
 //
-// This batch covers only the dimensions observable from data mAPI-ng already
-// collects (the "✅ now" column of the plan's coverage matrix). The memory
-// faults (leak/spike/churn/bloat) land in a later batch, alongside the
-// post-GC-heap instrumentation that makes them legible.
+// The memory faults (leak/spike/churn/bloat) move the post-GC live heap and the
+// allocation rate/size, so they are legible only alongside the post-GC-heap and
+// true-RSS instrumentation that ships with them.
 package faults
 
 import (
@@ -55,6 +54,10 @@ func Register(r gin.IRouter) {
 	g.GET("/goroutineleak", handleGoroutineLeak)
 	g.GET("/downstream", handleDownstream)
 	g.GET("/boom", handleBoom)
+	g.GET("/leak", handleLeak)
+	g.GET("/spike", handleSpike)
+	g.GET("/churn", handleChurn)
+	g.GET("/bloat", handleBloat)
 	g.GET("/reset", handleReset)
 }
 
@@ -291,6 +294,108 @@ func handleDownstream(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// --- memory faults ---------------------------------------------------------
+//
+// These are the leak-vs-burst discrimination pair plus the allocation-shape pair.
+// They move REAL runtime signals: retained allocations raise the post-GC live
+// heap (a staircase for leak, a sawtooth for spike), and short-lived allocations
+// drive the allocation rate and average allocation size (tiny-and-many for churn,
+// few-and-huge for bloat). All are process-global, matching how heap pressure is
+// a property of the instance. `held` is the only retained state; /fault/reset
+// frees it.
+
+// memSink defeats dead-code elimination of the transient allocations below: every
+// fault XORs a byte from what it allocates into it, so the compiler cannot prove
+// the allocation is unused and elide it.
+var memSink atomic.Uint64
+
+// touch writes to the first byte of every 4 KB page of b and folds one byte back
+// into memSink, forcing the pages to be committed (so RSS actually moves) and the
+// allocation to escape.
+func touch(b []byte) {
+	var acc byte
+	for i := 0; i < len(b); i += 4096 {
+		b[i] = byte(i)
+		acc ^= b[i]
+	}
+	if len(b) > 0 {
+		acc ^= b[len(b)-1]
+	}
+	memSink.Add(uint64(acc))
+}
+
+// held is the leaked memory for /fault/leak: buffers retained forever (until
+// reset), so the post-GC live heap climbs monotonically. heldBytes tracks the
+// total for the response.
+var (
+	heldMu    sync.Mutex
+	held      [][]byte
+	heldBytes int64
+)
+
+// handleLeak retains kb KiB of heap on each call, never freeing it, so the post-GC
+// live heap grows as a staircase — the signature of a leak (vs the sawtooth of a
+// burst). Knob: ?kb=256. Released by /fault/reset.
+func handleLeak(c *gin.Context) {
+	kb := qint(c, "kb", 256, 0, 1024*1024)
+	b := make([]byte, kb*1024)
+	touch(b)
+	heldMu.Lock()
+	held = append(held, b)
+	heldBytes += int64(len(b))
+	total := heldBytes
+	heldMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{"held_bytes": total})
+}
+
+// handleSpike allocates mb MiB, touches it, then drops it (no retention), so the
+// heap sawtooths up and falls back to baseline after the next GC — a burst, not a
+// leak. The crown-jewel contrast with /fault/leak. Knob: ?mb=64.
+func handleSpike(c *gin.Context) {
+	mb := qint(c, "mb", 64, 0, 4096)
+	b := make([]byte, mb*1024*1024)
+	touch(b)
+	// b goes out of scope here: reclaimable at the next GC.
+	c.JSON(http.StatusOK, gin.H{"spiked_bytes": len(b)})
+}
+
+// handleChurn makes n short-lived tiny allocations per call, so the allocation
+// rate and allocation COUNT (mallocs) spike while the live heap stays flat and the
+// average allocation size stays small — many small objects. Knobs: ?n=200000,
+// ?sz=32 (bytes each). The buffers are stored into a heap-allocated slice (so
+// escape analysis cannot elide them onto the stack — that is what makes them count
+// as real heap allocations); the whole batch is dropped when the handler returns.
+func handleChurn(c *gin.Context) {
+	n := qint(c, "n", 200000, 0, 5000000)
+	sz := qint(c, "sz", 32, 1, 4096)
+	hold := make([][]byte, n)
+	for i := 0; i < n; i++ {
+		b := make([]byte, sz)
+		b[0] = byte(i)
+		hold[i] = b
+	}
+	var acc byte
+	for _, b := range hold {
+		acc ^= b[0]
+	}
+	memSink.Add(uint64(acc))
+	c.JSON(http.StatusOK, gin.H{"allocs": n, "size": sz})
+}
+
+// handleBloat makes a few very large short-lived allocations per call, so the
+// allocation rate is high but the allocation COUNT is low — the average allocation
+// size blows up (large objects), the opposite shape from churn. Knobs: ?mb=16,
+// ?count=4.
+func handleBloat(c *gin.Context) {
+	mb := qint(c, "mb", 16, 1, 4096)
+	count := qint(c, "count", 4, 1, 1024)
+	for i := 0; i < count; i++ {
+		b := make([]byte, mb*1024*1024)
+		touch(b) // b dropped next iteration
+	}
+	c.JSON(http.StatusOK, gin.H{"count": count, "mb_each": mb})
+}
+
 // --- reset -----------------------------------------------------------------
 
 // handleReset clears all stateful faults: it zeroes the CPU/latency ramps and
@@ -306,8 +411,14 @@ func handleReset(c *gin.Context) {
 	leakQuit = make(chan struct{})
 	leakCount = 0
 	leakMu.Unlock()
+	heldMu.Lock()
+	freed := heldBytes
+	held = nil
+	heldBytes = 0
+	heldMu.Unlock()
 	c.JSON(http.StatusOK, gin.H{
 		"reset":               true,
 		"goroutines_released": released,
+		"heap_freed_bytes":    freed,
 	})
 }
