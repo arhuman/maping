@@ -16,16 +16,22 @@ import (
 // per-window deltas; the rest are point-in-time reads. It is a separate stream
 // from Row (per-endpoint summaries).
 type InstanceWindowRow struct {
-	Tenant         tenant.ID
-	Service        string
-	Instance       string
-	WindowStart    time.Time
-	WindowEnd      time.Time
-	CPUNs          uint64
-	RSSBytes       uint64
-	HeapAllocBytes uint64
-	GCPauseNs      uint64
-	Goroutines     uint64
+	Tenant          tenant.ID
+	Service         string
+	Instance        string
+	WindowStart     time.Time
+	WindowEnd       time.Time
+	CPUNs           uint64
+	RSSBytes        uint64
+	HeapAllocBytes  uint64
+	GCPauseNs       uint64
+	Goroutines      uint64
+	NumGC           uint64  // completed GC cycles during the window (delta)
+	TotalAllocBytes uint64  // heap bytes allocated during the window (delta)
+	Mallocs         uint64  // heap objects allocated during the window (delta)
+	GCCPUFraction   float64 // fraction of CPU time in GC since start (gauge, 0..1)
+	HeapInuseBytes  uint64  // in-use heap bytes at sample time (gauge)
+	GOMAXPROCS      uint32  // GOMAXPROCS at sample time (gauge)
 }
 
 // InstanceResourceStat is the per-instance resource summary over the query
@@ -33,12 +39,18 @@ type InstanceWindowRow struct {
 // memory / goroutine gauges (max over the window). It answers "which replica is
 // saturated, and how?".
 type InstanceResourceStat struct {
-	Instance       string
-	CPUNs          uint64
-	RSSBytes       uint64
-	HeapAllocBytes uint64
-	GCPauseNs      uint64
-	Goroutines     uint64
+	Instance        string
+	CPUNs           uint64
+	RSSBytes        uint64
+	HeapAllocBytes  uint64
+	GCPauseNs       uint64
+	Goroutines      uint64
+	NumGC           uint64  // completed GC cycles over the window (delta sum)
+	TotalAllocBytes uint64  // heap bytes allocated over the window (delta sum)
+	Mallocs         uint64  // heap objects allocated over the window (delta sum)
+	GCCPUFraction   float64 // average GC CPU fraction over the window (gauge avg)
+	HeapInuseBytes  uint64  // peak in-use heap bytes over the window (gauge max)
+	GOMAXPROCS      uint32  // peak GOMAXPROCS over the window (gauge max)
 }
 
 // instanceResourcesQueryTemplate aggregates one row per instance of a service
@@ -49,11 +61,17 @@ type InstanceResourceStat struct {
 const instanceResourcesQueryTemplate = `
 SELECT
     instance,
-    sum(cpu_ns)           AS cpu_ns,
-    max(rss_bytes)        AS rss_bytes,
-    max(heap_alloc_bytes) AS heap_alloc_bytes,
-    sum(gc_pause_ns)      AS gc_pause_ns,
-    max(goroutines)       AS goroutines
+    sum(cpu_ns)            AS cpu_ns,
+    max(rss_bytes)         AS rss_bytes,
+    max(heap_alloc_bytes)  AS heap_alloc_bytes,
+    sum(gc_pause_ns)       AS gc_pause_ns,
+    max(goroutines)        AS goroutines,
+    sum(num_gc)            AS num_gc,
+    sum(total_alloc_bytes) AS total_alloc_bytes,
+    sum(mallocs)           AS mallocs,
+    avg(gc_cpu_fraction)   AS gc_cpu_fraction,
+    max(heap_inuse_bytes)  AS heap_inuse_bytes,
+    max(gomaxprocs)        AS gomaxprocs
 FROM instance_windows
 WHERE tenant = ?
   AND service = ?
@@ -82,6 +100,9 @@ func InstanceResourcesForService(
 	defer rows.Close()
 
 	return scanRows(rows, "InstanceResourcesForService", func(s *InstanceResourceStat) []any {
-		return []any{&s.Instance, &s.CPUNs, &s.RSSBytes, &s.HeapAllocBytes, &s.GCPauseNs, &s.Goroutines}
+		return []any{
+			&s.Instance, &s.CPUNs, &s.RSSBytes, &s.HeapAllocBytes, &s.GCPauseNs, &s.Goroutines,
+			&s.NumGC, &s.TotalAllocBytes, &s.Mallocs, &s.GCCPUFraction, &s.HeapInuseBytes, &s.GOMAXPROCS,
+		}
 	})
 }

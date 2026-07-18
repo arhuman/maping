@@ -7,10 +7,14 @@
 -- up?" with no release, by putting saturation next to the RED metrics.
 --
 -- This is a NEW table (not an alter of summaries), so it needs no one-time drop:
--- a plain MergeTree keyed per instance over time. cpu_ns and gc_pause_ns are
--- per-window deltas; rss/heap/goroutines are point-in-time gauges. No rollup tiers
--- for now (the plan defers 1m/1h aggregation); the raw stream carries a short TTL
--- matching the summaries raw tier.
+-- a plain MergeTree keyed per instance over time. cpu_ns, gc_pause_ns, num_gc,
+-- total_alloc_bytes and mallocs are per-window deltas; rss/heap/goroutines/
+-- gc_cpu_fraction/heap_inuse_bytes/gomaxprocs are point-in-time gauges. No rollup
+-- tiers for now; the raw stream carries a short TTL matching the summaries raw tier.
+--
+-- num_gc..gomaxprocs are additive MemStats fields already read per sample by the
+-- client (near-zero cost). They are declared here so a fresh DB gets them directly;
+-- 0004 ADDs the same columns to an existing dev DB (non-destructive, no reset).
 
 CREATE TABLE IF NOT EXISTS instance_windows
 (
@@ -23,7 +27,13 @@ CREATE TABLE IF NOT EXISTS instance_windows
     rss_bytes        UInt64,
     heap_alloc_bytes UInt64,
     gc_pause_ns      UInt64,
-    goroutines       UInt64
+    goroutines       UInt64,
+    num_gc            UInt64,
+    total_alloc_bytes UInt64,
+    mallocs           UInt64,
+    gc_cpu_fraction   Float64,
+    heap_inuse_bytes  UInt64,
+    gomaxprocs        UInt32
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)

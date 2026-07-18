@@ -166,13 +166,19 @@ func TestSummaryToRowNil(t *testing.T) {
 func TestInstanceWindowToRow(t *testing.T) {
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
 	iw := &mapingv1.InstanceWindow{
-		WindowStartMs:  now.Add(-10 * time.Second).UnixMilli(),
-		WindowEndMs:    now.UnixMilli(),
-		CpuNs:          1500,
-		RssBytes:       2048,
-		HeapAllocBytes: 1024,
-		GcPauseNs:      300,
-		Goroutines:     42,
+		WindowStartMs:   now.Add(-10 * time.Second).UnixMilli(),
+		WindowEndMs:     now.UnixMilli(),
+		CpuNs:           1500,
+		RssBytes:        2048,
+		HeapAllocBytes:  1024,
+		GcPauseNs:       300,
+		Goroutines:      42,
+		NumGc:           7,
+		TotalAllocBytes: 500000,
+		Mallocs:         1000,
+		GcCpuFraction:   0.12,
+		HeapInuseBytes:  900,
+		Gomaxprocs:      8,
 	}
 	row, ok := instanceWindowToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1", iw, now)
 	require.True(t, ok)
@@ -184,6 +190,12 @@ func TestInstanceWindowToRow(t *testing.T) {
 	assert.Equal(t, uint64(1024), row.HeapAllocBytes)
 	assert.Equal(t, uint64(300), row.GCPauseNs)
 	assert.Equal(t, uint64(42), row.Goroutines)
+	assert.Equal(t, uint64(7), row.NumGC)
+	assert.Equal(t, uint64(500000), row.TotalAllocBytes)
+	assert.Equal(t, uint64(1000), row.Mallocs)
+	assert.InDelta(t, 0.12, row.GCCPUFraction, 1e-9)
+	assert.Equal(t, uint64(900), row.HeapInuseBytes)
+	assert.Equal(t, uint32(8), row.GOMAXPROCS)
 }
 
 func TestInstanceWindowToRowRejectsSkewAndNil(t *testing.T) {

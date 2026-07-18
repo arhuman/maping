@@ -166,6 +166,24 @@ message InstanceWindow {
   uint64 heap_alloc_bytes = 5;    // live heap bytes at sample time
   uint64 gc_pause_ns = 6;         // GC stop-the-world pause time during the window
   uint64 goroutines = 7;          // goroutine count at sample time
+  // num_gc is the number of completed GC cycles during the window (a DELTA of the
+  // cumulative runtime counter), so GC frequency can be read as num_gc/window.
+  uint64 num_gc = 8;
+  // total_alloc_bytes is the bytes allocated on the heap during the window (a
+  // DELTA of the cumulative counter), giving the allocation rate.
+  uint64 total_alloc_bytes = 9;
+  // mallocs is the number of heap objects allocated during the window (a DELTA of
+  // the cumulative counter); total_alloc_bytes/mallocs is the average alloc size.
+  uint64 mallocs = 10;
+  // gc_cpu_fraction is the fraction of total CPU time spent in GC since process
+  // start (0..1), a point-in-time gauge covering concurrent GC, not just STW.
+  double gc_cpu_fraction = 11;
+  // heap_inuse_bytes is in-use heap bytes at sample time (spans with live objects),
+  // a tighter memory read than rss_bytes. Point-in-time gauge.
+  uint64 heap_inuse_bytes = 12;
+  // gomaxprocs is the process's GOMAXPROCS at sample time, used to normalize CPU
+  // intensity to a share of available cores. Point-in-time gauge.
+  uint32 gomaxprocs = 13;
 }
 
 message UploadResponse {

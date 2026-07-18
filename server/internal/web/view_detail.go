@@ -380,24 +380,30 @@ func toDownstreamView(s storage.DownstreamStat) downstreamView {
 // goroutine gauges. Rows arrive ordered by instance from storage. It answers "did
 // p99 rise because this replica's GC ate wall time or goroutines blew up?".
 type resourceRow struct {
-	Instance   string
-	CoresUsed  float64 // average cores consumed over the window (cpu_ns / window_ns)
-	GCShare    float64 // fraction of wall time in STW GC pause, 0..1 (for pctd)
-	RSSBytes   float64 // peak resident-memory proxy, in bytes (for the bytes fmt)
-	HeapBytes  float64 // peak live-heap bytes
-	Goroutines uint64  // peak goroutine count
+	Instance      string
+	CoresUsed     float64 // average cores consumed over the window (cpu_ns / window_ns)
+	GCShare       float64 // fraction of wall time in STW GC pause, 0..1 (for pctd)
+	RSSBytes      float64 // peak resident-memory proxy, in bytes (for the bytes fmt)
+	HeapBytes     float64 // peak live-heap bytes
+	Goroutines    uint64  // peak goroutine count
+	GCFreq        float64 // GC cycles per second over the window (num_gc / winSeconds)
+	GCCPUFraction float64 // fraction of CPU time in GC, 0..1 (for pctd)
+	AllocRate     float64 // heap bytes allocated per second (total_alloc / winSeconds)
+	AvgAllocSize  float64 // average allocation size in bytes (total_alloc / mallocs)
 }
 
 // toResourceRows maps the storage per-instance USE stats into display rows,
 // converting the summed per-window CPU and GC-pause deltas into intensities: cores
-// consumed (cpu_ns / window_ns) and STW GC-pause share of wall time. A
-// non-positive window yields zero intensities, and GC share is clamped to [0,1].
-// Byte gauges become float64 for the bytes formatter. Storage order (by instance)
-// is preserved.
+// consumed (cpu_ns / window_ns) and STW GC-pause share of wall time. The MemStats
+// deltas become rates over the window (GC frequency, allocation rate), and the
+// per-object average allocation size is total_alloc / mallocs (guarded against a
+// zero malloc count). A non-positive window yields zero intensities/rates, and GC
+// share is clamped to [0,1]. Byte gauges become float64 for the bytes formatter.
+// Storage order (by instance) is preserved.
 func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []resourceRow {
 	out := make([]resourceRow, 0, len(stats))
 	for _, s := range stats {
-		var cores, gcShare float64
+		var cores, gcShare, gcFreq, allocRate float64
 		if winSeconds > 0 {
 			winNs := winSeconds * 1e9
 			cores = float64(s.CPUNs) / winNs
@@ -405,14 +411,24 @@ func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []
 			if gcShare > 1 {
 				gcShare = 1
 			}
+			gcFreq = float64(s.NumGC) / winSeconds
+			allocRate = float64(s.TotalAllocBytes) / winSeconds
+		}
+		var avgAlloc float64
+		if s.Mallocs > 0 {
+			avgAlloc = float64(s.TotalAllocBytes) / float64(s.Mallocs)
 		}
 		out = append(out, resourceRow{
-			Instance:   s.Instance,
-			CoresUsed:  cores,
-			GCShare:    gcShare,
-			RSSBytes:   float64(s.RSSBytes),
-			HeapBytes:  float64(s.HeapAllocBytes),
-			Goroutines: s.Goroutines,
+			Instance:      s.Instance,
+			CoresUsed:     cores,
+			GCShare:       gcShare,
+			RSSBytes:      float64(s.RSSBytes),
+			HeapBytes:     float64(s.HeapAllocBytes),
+			Goroutines:    s.Goroutines,
+			GCFreq:        gcFreq,
+			GCCPUFraction: s.GCCPUFraction,
+			AllocRate:     allocRate,
+			AvgAllocSize:  avgAlloc,
 		})
 	}
 	return out

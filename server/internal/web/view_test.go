@@ -171,11 +171,19 @@ func TestToResourceRowsIntensities(t *testing.T) {
 	t.Run("cores and gc share", func(t *testing.T) {
 		// 87s of CPU over a 100s window -> 0.87 cores; 1.2s STW pause -> 1.2%.
 		rows := toResourceRows([]storage.InstanceResourceStat{
-			{Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048, HeapAllocBytes: 1024, Goroutines: 42},
+			{
+				Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048, HeapAllocBytes: 1024, Goroutines: 42,
+				NumGC: 830, TotalAllocBytes: 510e9, Mallocs: 1e6, GCCPUFraction: 0.18,
+			},
 		}, winSec)
 		require.Len(t, rows, 1)
 		assert.InDelta(t, 0.87, rows[0].CoresUsed, 1e-9)
 		assert.InDelta(t, 0.012, rows[0].GCShare, 1e-9)
+		// MemStats deltas become rates over the window; avg alloc = total/mallocs.
+		assert.InDelta(t, 8.3, rows[0].GCFreq, 1e-9)
+		assert.InDelta(t, 5.1e9, rows[0].AllocRate, 1)
+		assert.InDelta(t, 510000.0, rows[0].AvgAllocSize, 1e-6)
+		assert.InDelta(t, 0.18, rows[0].GCCPUFraction, 1e-9)
 		// Gauges pass through unchanged.
 		assert.Equal(t, 2048.0, rows[0].RSSBytes)
 		assert.Equal(t, 1024.0, rows[0].HeapBytes)
@@ -198,6 +206,10 @@ func TestToResourceRowsIntensities(t *testing.T) {
 		require.Len(t, rows, 1)
 		assert.Zero(t, rows[0].CoresUsed)
 		assert.Zero(t, rows[0].GCShare)
+		assert.Zero(t, rows[0].GCFreq)
+		assert.Zero(t, rows[0].AllocRate)
+		// mallocs == 0, so the avg-alloc guard yields zero rather than dividing by zero.
+		assert.Zero(t, rows[0].AvgAllocSize)
 		// Byte gauges are independent of the window and still map through.
 		assert.Equal(t, 2048.0, rows[0].RSSBytes)
 	})

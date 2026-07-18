@@ -767,23 +767,27 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 		Tenant: tid, Service: "svc", Instance: "pod-a",
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 100, RSSBytes: 10, HeapAllocBytes: 100, GCPauseNs: 1, Goroutines: 5,
+		NumGC: 1, TotalAllocBytes: 1000, Mallocs: 10, GCCPUFraction: 0.1, HeapInuseBytes: 80, GOMAXPROCS: 4,
 	}))
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
 		Tenant: tid, Service: "svc", Instance: "pod-a",
 		WindowStart: now.Add(10 * time.Second), WindowEnd: now.Add(20 * time.Second),
 		CPUNs: 200, RSSBytes: 20, HeapAllocBytes: 50, GCPauseNs: 2, Goroutines: 9,
+		NumGC: 2, TotalAllocBytes: 2000, Mallocs: 20, GCCPUFraction: 0.3, HeapInuseBytes: 60, GOMAXPROCS: 8,
 	}))
 	// pod-b reports one window.
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
 		Tenant: tid, Service: "svc", Instance: "pod-b",
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 50, RSSBytes: 7, HeapAllocBytes: 30, GCPauseNs: 4, Goroutines: 3,
+		NumGC: 5, TotalAllocBytes: 500, Mallocs: 25, GCCPUFraction: 0.4, HeapInuseBytes: 25, GOMAXPROCS: 2,
 	}))
 	// Another tenant's gauges must stay isolated.
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
 		Tenant: tenant.MustParse("other-iw-tenant"), Service: "svc", Instance: "pod-a",
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 9999, RSSBytes: 9999, HeapAllocBytes: 9999, GCPauseNs: 9999, Goroutines: 9999,
+		NumGC: 9999, TotalAllocBytes: 9999, Mallocs: 9999, GCCPUFraction: 0.99, HeapInuseBytes: 9999, GOMAXPROCS: 99,
 	}))
 
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -802,6 +806,13 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 	require.Equal(t, uint64(20), res[0].RSSBytes)
 	require.Equal(t, uint64(100), res[0].HeapAllocBytes)
 	require.Equal(t, uint64(9), res[0].Goroutines)
+	// MemStats deltas sum; gc_cpu_fraction averages; heap_inuse/gomaxprocs take the peak.
+	require.Equal(t, uint64(3), res[0].NumGC)              // 1+2
+	require.Equal(t, uint64(3000), res[0].TotalAllocBytes) // 1000+2000
+	require.Equal(t, uint64(30), res[0].Mallocs)           // 10+20
+	require.InDelta(t, 0.2, res[0].GCCPUFraction, 1e-9)    // avg(0.1, 0.3)
+	require.Equal(t, uint64(80), res[0].HeapInuseBytes)    // max(80, 60)
+	require.Equal(t, uint32(8), res[0].GOMAXPROCS)         // max(4, 8)
 
 	require.Equal(t, "pod-b", res[1].Instance)
 	require.Equal(t, uint64(50), res[1].CPUNs)

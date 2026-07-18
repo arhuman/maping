@@ -113,16 +113,22 @@ func instanceWindowToRow(
 		return storage.InstanceWindowRow{}, false
 	}
 	return storage.InstanceWindowRow{
-		Tenant:         tid,
-		Service:        service,
-		Instance:       instance,
-		WindowStart:    decision.start,
-		WindowEnd:      decision.end,
-		CPUNs:          iw.GetCpuNs(),
-		RSSBytes:       iw.GetRssBytes(),
-		HeapAllocBytes: iw.GetHeapAllocBytes(),
-		GCPauseNs:      iw.GetGcPauseNs(),
-		Goroutines:     iw.GetGoroutines(),
+		Tenant:          tid,
+		Service:         service,
+		Instance:        instance,
+		WindowStart:     decision.start,
+		WindowEnd:       decision.end,
+		CPUNs:           iw.GetCpuNs(),
+		RSSBytes:        iw.GetRssBytes(),
+		HeapAllocBytes:  iw.GetHeapAllocBytes(),
+		GCPauseNs:       iw.GetGcPauseNs(),
+		Goroutines:      iw.GetGoroutines(),
+		NumGC:           iw.GetNumGc(),
+		TotalAllocBytes: iw.GetTotalAllocBytes(),
+		Mallocs:         iw.GetMallocs(),
+		GCCPUFraction:   iw.GetGcCpuFraction(),
+		HeapInuseBytes:  iw.GetHeapInuseBytes(),
+		GOMAXPROCS:      iw.GetGomaxprocs(),
 	}, true
 }
 

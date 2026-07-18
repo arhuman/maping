@@ -660,8 +660,26 @@ type InstanceWindow struct {
 	HeapAllocBytes uint64                 `protobuf:"varint,5,opt,name=heap_alloc_bytes,json=heapAllocBytes,proto3" json:"heap_alloc_bytes,omitempty"` // live heap bytes at sample time
 	GcPauseNs      uint64                 `protobuf:"varint,6,opt,name=gc_pause_ns,json=gcPauseNs,proto3" json:"gc_pause_ns,omitempty"`                // GC stop-the-world pause time during the window
 	Goroutines     uint64                 `protobuf:"varint,7,opt,name=goroutines,proto3" json:"goroutines,omitempty"`                                 // goroutine count at sample time
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// num_gc is the number of completed GC cycles during the window (a DELTA of the
+	// cumulative runtime counter), so GC frequency can be read as num_gc/window.
+	NumGc uint64 `protobuf:"varint,8,opt,name=num_gc,json=numGc,proto3" json:"num_gc,omitempty"`
+	// total_alloc_bytes is the bytes allocated on the heap during the window (a
+	// DELTA of the cumulative counter), giving the allocation rate.
+	TotalAllocBytes uint64 `protobuf:"varint,9,opt,name=total_alloc_bytes,json=totalAllocBytes,proto3" json:"total_alloc_bytes,omitempty"`
+	// mallocs is the number of heap objects allocated during the window (a DELTA of
+	// the cumulative counter); total_alloc_bytes/mallocs is the average alloc size.
+	Mallocs uint64 `protobuf:"varint,10,opt,name=mallocs,proto3" json:"mallocs,omitempty"`
+	// gc_cpu_fraction is the fraction of total CPU time spent in GC since process
+	// start (0..1), a point-in-time gauge covering concurrent GC, not just STW.
+	GcCpuFraction float64 `protobuf:"fixed64,11,opt,name=gc_cpu_fraction,json=gcCpuFraction,proto3" json:"gc_cpu_fraction,omitempty"`
+	// heap_inuse_bytes is in-use heap bytes at sample time (spans with live objects),
+	// a tighter memory read than rss_bytes. Point-in-time gauge.
+	HeapInuseBytes uint64 `protobuf:"varint,12,opt,name=heap_inuse_bytes,json=heapInuseBytes,proto3" json:"heap_inuse_bytes,omitempty"`
+	// gomaxprocs is the process's GOMAXPROCS at sample time, used to normalize CPU
+	// intensity to a share of available cores. Point-in-time gauge.
+	Gomaxprocs    uint32 `protobuf:"varint,13,opt,name=gomaxprocs,proto3" json:"gomaxprocs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InstanceWindow) Reset() {
@@ -739,6 +757,48 @@ func (x *InstanceWindow) GetGcPauseNs() uint64 {
 func (x *InstanceWindow) GetGoroutines() uint64 {
 	if x != nil {
 		return x.Goroutines
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetNumGc() uint64 {
+	if x != nil {
+		return x.NumGc
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetTotalAllocBytes() uint64 {
+	if x != nil {
+		return x.TotalAllocBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetMallocs() uint64 {
+	if x != nil {
+		return x.Mallocs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetGcCpuFraction() float64 {
+	if x != nil {
+		return x.GcCpuFraction
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetHeapInuseBytes() uint64 {
+	if x != nil {
+		return x.HeapInuseBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetGomaxprocs() uint32 {
+	if x != nil {
+		return x.Gomaxprocs
 	}
 	return 0
 }
@@ -995,7 +1055,7 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\rUploadRequest\x12/\n" +
 	"\benvelope\x18\x01 \x01(\v2\x13.maping.v1.EnvelopeR\benvelope\x120\n" +
 	"\tsummaries\x18\x02 \x03(\v2\x12.maping.v1.SummaryR\tsummaries\x12D\n" +
-	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\xfa\x01\n" +
+	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\xc9\x03\n" +
 	"\x0eInstanceWindow\x12&\n" +
 	"\x0fwindow_start_ms\x18\x01 \x01(\x03R\rwindowStartMs\x12\"\n" +
 	"\rwindow_end_ms\x18\x02 \x01(\x03R\vwindowEndMs\x12\x15\n" +
@@ -1005,7 +1065,16 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\vgc_pause_ns\x18\x06 \x01(\x04R\tgcPauseNs\x12\x1e\n" +
 	"\n" +
 	"goroutines\x18\a \x01(\x04R\n" +
-	"goroutines\"s\n" +
+	"goroutines\x12\x15\n" +
+	"\x06num_gc\x18\b \x01(\x04R\x05numGc\x12*\n" +
+	"\x11total_alloc_bytes\x18\t \x01(\x04R\x0ftotalAllocBytes\x12\x18\n" +
+	"\amallocs\x18\n" +
+	" \x01(\x04R\amallocs\x12&\n" +
+	"\x0fgc_cpu_fraction\x18\v \x01(\x01R\rgcCpuFraction\x12(\n" +
+	"\x10heap_inuse_bytes\x18\f \x01(\x04R\x0eheapInuseBytes\x12\x1e\n" +
+	"\n" +
+	"gomaxprocs\x18\r \x01(\rR\n" +
+	"gomaxprocs\"s\n" +
 	"\x0eUploadResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12-\n" +
