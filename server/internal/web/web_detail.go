@@ -46,12 +46,34 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 	winSec := to.Sub(from).Seconds()
 	verdict := computeVerdict(dv, p.baseline, winSec)
 
-	// The leak/burst read is a standalone card in the diagnostic disclosure. A
-	// leak can present as a flat-RED banner (steady errors, no latency change), so
-	// a Leak/Burst signal OR-s the disclosure open to surface the card — without
-	// touching the health banner's own level/headline/sentence.
+	// The diagnosis engine correlates the signals already loaded on the page into
+	// a ranked-cause card, absorbing the standalone leak-vs-burst read as its
+	// Memory/GC cause. The memory verdict feeds it (and its chart is the Memory
+	// cause's evidence visual); computeVerdict itself is unchanged.
 	mv := computeMemoryVerdict(p.memory)
-	if mv.Level == "Leak" || mv.Level == "Burst" {
+	instances := toInstanceRows(p.instances)
+	p95Base, p95BaseOK := baselineMedianP95(p.baseline)
+	diag := computeDiagnosis(diagnosisParams{
+		Detail:           dv,
+		Verdict:          verdict,
+		Resources:        p.resources,
+		ResourceBaseline: p.resourceBaseline,
+		Memory:           mv,
+		MemoryChart:      memoryTrendSVG(p.memory, step),
+		Instances:        instances,
+		Versions:         p.versions,
+		Downstream:       p.downstream,
+		NoStatus:         p.noStatusReasons,
+		P95Baseline:      p95Base,
+		P95BaselineOK:    p95BaseOK,
+		WinSeconds:       winSec,
+		BaselineSeconds:  detailBaselineWindow.Seconds(),
+	})
+
+	// A fired diagnosis (which includes a flat-RED memory leak, since the gating
+	// ORs Leak/Burst) auto-expands the disclosure so the card surfaces even when
+	// the health banner is flat — without touching the banner's own level/sentence.
+	if diag.Show {
 		verdict.Open = true
 	}
 	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service, Href: withWin("/services/"+service, winKey)}, {Label: method + " " + route}}
@@ -68,7 +90,7 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		Range:           buildDetailRange(service, method, route, winKey, from, to, time.Now().UTC(), custom),
 		TSChart:         timeSeriesSVG(p.points, step),
 		HistChart:       histogramSVG(detail.Histogram, detail.P50, detail.P95, detail.P99),
-		Instances:       toInstanceRows(p.instances),
+		Instances:       instances,
 		Versions:        toVersionRows(p.versions),
 		Exemplars:       toExemplarRows(p.exemplars),
 		ClassLatency:    toClassLatencyRows(p.byClass),
@@ -76,32 +98,40 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		NoStatusReasons: toNoStatusReasonRows(p.noStatusReasons),
 		Downstream:      toDownstreamView(p.downstream),
 		Resources:       toResourceRows(p.resources, winSec),
-		MemoryVerdict:   mv,
-		MemoryChart:     memoryTrendSVG(p.memory, step),
+		Diagnosis:       diag,
 	})
 }
 
-// detailPanels holds the nine secondary detail-page query results, loaded
+// detailPanels holds the secondary detail-page query results, loaded
 // concurrently by loadDetailPanels.
 type detailPanels struct {
-	points          []storage.TimePoint
-	baseline        []storage.TimePoint
-	instances       []storage.InstanceStat
-	versions        []storage.VersionStat
-	exemplars       []storage.ExemplarRow
-	byClass         map[string]storage.ClassLatency
-	errorClasses    []storage.ErrorClassStat
-	noStatusReasons []storage.NoStatusReasonStat
-	downstream      storage.DownstreamStat
-	resources       []storage.InstanceResourceStat
-	memory          []storage.MemoryTrendPoint
+	points           []storage.TimePoint
+	baseline         []storage.TimePoint
+	instances        []storage.InstanceStat
+	versions         []storage.VersionStat
+	exemplars        []storage.ExemplarRow
+	byClass          map[string]storage.ClassLatency
+	errorClasses     []storage.ErrorClassStat
+	noStatusReasons  []storage.NoStatusReasonStat
+	downstream       storage.DownstreamStat
+	resources        []storage.InstanceResourceStat
+	resourceBaseline []storage.InstanceResourceStat
+	memory           []storage.MemoryTrendPoint
 }
 
-// loadDetailPanels runs the nine independent secondary detail queries
-// concurrently and returns once all have completed (each fail-soft to its zero
-// value via softQuery). Every goroutine writes only its own field, so the
-// concurrent writes never overlap; the caller sees the sum of nine queries as
-// the latency of the slowest one.
+// detailBaselineLag and detailBaselineWindow define the lagged trailing baseline
+// the verdict and diagnosis compare against: a 6h window ending 5m before "to",
+// so the current incident cannot poison its own baseline. Both the series
+// baseline and the resource baseline read this same window.
+const (
+	detailBaselineLag    = 5 * time.Minute
+	detailBaselineWindow = 6 * time.Hour
+)
+
+// loadDetailPanels runs the independent secondary detail queries concurrently
+// and returns once all have completed (each fail-soft to its zero value via
+// softQuery). Every goroutine writes only its own field, so the concurrent
+// writes never overlap; the caller sees the latency of the slowest query.
 func (h *Handler) loadDetailPanels(ctx context.Context, tq ScopedQuery, service, method, route string, from, to time.Time, step time.Duration) detailPanels {
 	var p detailPanels
 	var wg sync.WaitGroup
@@ -119,10 +149,21 @@ func (h *Handler) loadDetailPanels(ctx context.Context, tq ScopedQuery, service,
 		// cannot poison its own baseline) reconstructed at 1m resolution. Reuses the
 		// existing SeriesOverTime query — no new storage query. On failure it is nil
 		// and the latency-vs-baseline rule is skipped (verdict degrades gracefully).
-		baseTo := to.Add(-5 * time.Minute)
-		baseFrom := baseTo.Add(-6 * time.Hour)
+		baseTo := to.Add(-detailBaselineLag)
+		baseFrom := baseTo.Add(-detailBaselineWindow)
 		p.baseline = softQuery(ctx, h, "baseline-series", func(ctx context.Context) ([]storage.TimePoint, error) {
 			return tq.SeriesOverTime(ctx, service, method, route, baseFrom, baseTo, time.Minute)
+		})
+	})
+	run(func() {
+		// Resource baseline: the same lagged trailing window as the series baseline,
+		// so the diagnosis engine can compare current per-instance resource use
+		// (CPU, GC, alloc, in-flight, fds) against a quiet reference. Reuses the
+		// existing service-scoped InstanceResourcesForService query — no new query.
+		baseTo := to.Add(-detailBaselineLag)
+		baseFrom := baseTo.Add(-detailBaselineWindow)
+		p.resourceBaseline = softQuery(ctx, h, "instance-resources-baseline", func(ctx context.Context) ([]storage.InstanceResourceStat, error) {
+			return tq.InstanceResourcesForService(ctx, service, baseFrom, baseTo)
 		})
 	})
 	run(func() {

@@ -54,6 +54,38 @@ const tplDetailHTML = `
   </div>
   <details class="diag"{{if .Verdict.Open}} open{{end}}>
   <summary>Diagnostic details</summary>
+  {{if .Diagnosis.Show}}
+  <div class="panel" style="padding:18px 20px;margin-top:18px;border-color:rgba(180,241,74,.28);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;"><span style="font:700 10px var(--mono);color:var(--accent);letter-spacing:1px;">RANKED CAUSE</span><span style="font:500 11px var(--mono);color:var(--txt-3);">{{.Diagnosis.Why}}</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px;">
+      <span class="dot {{.Diagnosis.TopCause.DotClass}}" style="flex-shrink:0;"></span>
+      <span style="font:700 15px var(--ui);flex-shrink:0;">{{.Diagnosis.TopCause.Name}}</span>
+      {{if .Diagnosis.TopCause.Confidence}}<span style="font:600 10px var(--mono);color:var(--txt-3);border:1px solid var(--line);border-radius:6px;padding:2px 7px;flex-shrink:0;letter-spacing:.4px;">{{.Diagnosis.TopCause.Confidence}}</span>{{end}}
+    </div>
+    {{if .Diagnosis.Scope}}<div style="font:500 11.5px var(--mono);color:var(--txt-3);margin-bottom:12px;">Scope: {{.Diagnosis.Scope}}</div>{{end}}
+    {{if .Diagnosis.TopCause.Evidence}}
+    <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+      {{range .Diagnosis.TopCause.Evidence}}<li style="font:500 12px var(--mono);color:var(--txt-2);">{{.}}</li>{{end}}
+    </ul>
+    {{end}}
+    {{if .Diagnosis.TopCause.Chart}}
+    <div style="margin-top:14px;">{{.Diagnosis.TopCause.Chart}}</div>
+    <div style="display:flex;gap:16px;margin-top:10px;font:600 11px var(--mono);color:var(--txt-3);">
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:3px;border-radius:2px;background:var(--accent);"></span>post-GC live heap</span>
+      <span style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:3px;border-radius:2px;background:var(--txt-3);"></span>in-use heap</span>
+    </div>
+    {{end}}
+    {{if .Diagnosis.TopCause.Falsifier}}
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft);font:500 11.5px var(--mono);color:var(--txt-3);"><span style="color:var(--txt-2);">Falsifier:</span> {{.Diagnosis.TopCause.Falsifier}}</div>
+    {{end}}
+    {{if .Diagnosis.Others}}
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+      <span style="font:600 10px var(--mono);color:var(--txt-3);letter-spacing:.8px;">ALSO CONSIDERED</span>
+      {{range .Diagnosis.Others}}<span style="display:flex;align-items:center;gap:7px;font:500 11.5px var(--mono);color:var(--txt-2);background:var(--panel-3);border:1px solid var(--line);border-radius:7px;padding:4px 9px;"><span class="dot {{.DotClass}}" style="width:7px;height:7px;"></span>{{.Name}} <span style="color:var(--txt-3);">· {{.Confidence}}</span></span>{{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
   <div class="panel" style="padding:13px 16px;margin-top:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
     <span style="font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;flex-shrink:0;">DEBUG CONTEXT</span>
     <span id="mp-debug" class="mono" style="flex:1;min-width:220px;font-size:12px;color:var(--txt-2);word-break:break-word;">{{.Debug.Summary}}</span>
@@ -190,30 +222,6 @@ const tplDetailHTML = `
       <div style="font:600 12.5px var(--mono);color:var(--txt-2);">{{.Reason}}</div>
       <div class="tnum">{{.Count}}</div>
     </div>
-    {{end}}
-  </div>
-  {{end}}
-  {{if .MemoryVerdict.Show}}
-  <div class="panel" style="padding:18px 20px;margin-top:18px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;"><span style="font-size:13.5px;font-weight:700;">Memory</span><span style="font:500 11px var(--mono);color:var(--txt-3);">leak or burst? · the instances serving this endpoint, per-process</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:10px 0 14px;">
-      <span class="dot {{.MemoryVerdict.DotClass}}" style="flex-shrink:0;"></span>
-      <span style="font:700 13.5px var(--ui);flex-shrink:0;">{{.MemoryVerdict.Level}}</span>
-      {{if .MemoryVerdict.Confidence}}<span style="font:600 10px var(--mono);color:var(--txt-3);border:1px solid var(--line);border-radius:6px;padding:2px 7px;flex-shrink:0;letter-spacing:.4px;">{{.MemoryVerdict.Confidence}} confidence</span>{{end}}
-      <span style="font:500 12.5px var(--mono);color:var(--txt-2);">{{.MemoryVerdict.Sentence}}</span>
-    </div>
-    {{.MemoryChart}}
-    <div style="display:flex;gap:16px;margin-top:12px;font:600 11px var(--mono);color:var(--txt-3);">
-      <span style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:3px;border-radius:2px;background:var(--accent);"></span>post-GC live heap</span>
-      <span style="display:flex;align-items:center;gap:6px;"><span style="width:12px;height:3px;border-radius:2px;background:var(--txt-3);"></span>in-use heap</span>
-    </div>
-    {{if .MemoryVerdict.Evidence}}
-    <ul style="margin:14px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
-      {{range .MemoryVerdict.Evidence}}<li style="font:500 12px var(--mono);color:var(--txt-2);">{{.}}</li>{{end}}
-    </ul>
-    {{end}}
-    {{if .MemoryVerdict.Falsifier}}
-    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft);font:500 11.5px var(--mono);color:var(--txt-3);"><span style="color:var(--txt-2);">Falsifier:</span> {{.MemoryVerdict.Falsifier}}</div>
     {{end}}
   </div>
   {{end}}
