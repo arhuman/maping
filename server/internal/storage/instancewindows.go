@@ -34,6 +34,9 @@ type InstanceWindowRow struct {
 	GOMAXPROCS      uint32  // GOMAXPROCS at sample time (gauge)
 	PostGCHeapBytes uint64  // live heap as of the last GC mark, post-GC baseline (gauge)
 	RSSTrueBytes    uint64  // true resident set size from the OS, 0 if unavailable (gauge)
+	OpenFDs         uint64  // open file-descriptor count, 0 if unavailable (gauge)
+	FDLimit         uint64  // soft RLIMIT_NOFILE ceiling, 0 if unavailable (gauge)
+	InFlight        uint64  // peak in-flight request concurrency during the window (gauge)
 }
 
 // InstanceResourceStat is the per-instance resource summary over the query
@@ -55,6 +58,9 @@ type InstanceResourceStat struct {
 	GOMAXPROCS      uint32  // peak GOMAXPROCS over the window (gauge max)
 	PostGCHeapBytes uint64  // peak post-GC heap baseline over the window (gauge max)
 	RSSTrueBytes    uint64  // peak true resident set size over the window (gauge max)
+	OpenFDs         uint64  // peak open file-descriptor count over the window (gauge max)
+	FDLimit         uint64  // peak soft RLIMIT_NOFILE ceiling over the window (gauge max)
+	InFlight        uint64  // peak in-flight request concurrency over the window (gauge max)
 }
 
 // instanceResourcesQueryTemplate aggregates one row per instance of a service
@@ -77,7 +83,10 @@ SELECT
     max(heap_inuse_bytes)  AS heap_inuse_bytes,
     max(gomaxprocs)        AS gomaxprocs,
     max(post_gc_heap_bytes) AS post_gc_heap_bytes,
-    max(rss_true_bytes)    AS rss_true_bytes
+    max(rss_true_bytes)    AS rss_true_bytes,
+    max(open_fds)          AS open_fds,
+    max(fd_limit)          AS fd_limit,
+    max(in_flight)         AS in_flight
 FROM instance_windows
 WHERE tenant = ?
   AND service = ?
@@ -109,7 +118,7 @@ func InstanceResourcesForService(
 		return []any{
 			&s.Instance, &s.CPUNs, &s.RSSBytes, &s.HeapAllocBytes, &s.GCPauseNs, &s.Goroutines,
 			&s.NumGC, &s.TotalAllocBytes, &s.Mallocs, &s.GCCPUFraction, &s.HeapInuseBytes, &s.GOMAXPROCS,
-			&s.PostGCHeapBytes, &s.RSSTrueBytes,
+			&s.PostGCHeapBytes, &s.RSSTrueBytes, &s.OpenFDs, &s.FDLimit, &s.InFlight,
 		}
 	})
 }

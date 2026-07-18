@@ -61,6 +61,10 @@ func Filter(opts ...maping.Option) web.FilterChain {
 func FilterWithRecorder(rec *maping.Recorder) web.FilterChain {
 	return func(next web.FilterFunc) web.FilterFunc {
 		return func(ctx *context.Context) {
+			// Count this request in flight for the window peak-concurrency gauge, and
+			// mark it done when the filter chain returns.
+			defer rec.BeginRequest()()
+
 			// Install the downstream-time accumulator so a maping.RoundTripper on the
 			// host's outbound http.Client can attribute round-trip time to this
 			// request. It is inert unless the host wires the RoundTripper and

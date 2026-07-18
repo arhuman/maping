@@ -33,6 +33,10 @@ func Middleware(opts ...maping.Option) gin.HandlerFunc {
 // http.Server.Shutdown).
 func MiddlewareWithRecorder(rec *maping.Recorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Count this request in flight for the window peak-concurrency gauge, and
+		// mark it done when the handler chain returns.
+		defer rec.BeginRequest()()
+
 		// Install the downstream-time accumulator so a maping.RoundTripper on the
 		// host's outbound http.Client can attribute round-trip time to this request.
 		// It is inert unless the host actually wires the RoundTripper and propagates

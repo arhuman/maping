@@ -174,7 +174,7 @@ func TestToResourceRowsIntensities(t *testing.T) {
 			{
 				Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048, HeapAllocBytes: 1024, Goroutines: 42,
 				NumGC: 830, TotalAllocBytes: 510e9, Mallocs: 1e6, GCCPUFraction: 0.18,
-				PostGCHeapBytes: 700, RSSTrueBytes: 4096,
+				PostGCHeapBytes: 700, RSSTrueBytes: 4096, OpenFDs: 220, FDLimit: 1024, InFlight: 12,
 			},
 		}, winSec)
 		require.Len(t, rows, 1)
@@ -193,6 +193,11 @@ func TestToResourceRowsIntensities(t *testing.T) {
 		assert.Equal(t, 700.0, rows[0].PostGCHeap)
 		assert.Equal(t, 4096.0, rows[0].TrueRSSBytes)
 		assert.True(t, rows[0].HasTrueRSS)
+		// FD gauges and peak in-flight pass through; a nonzero fd_limit sets HasFDLimit.
+		assert.Equal(t, uint64(220), rows[0].OpenFDs)
+		assert.Equal(t, uint64(1024), rows[0].FDLimit)
+		assert.True(t, rows[0].HasFDLimit)
+		assert.Equal(t, uint64(12), rows[0].InFlight)
 	})
 
 	t.Run("gc share clamps to 1", func(t *testing.T) {
@@ -219,6 +224,8 @@ func TestToResourceRowsIntensities(t *testing.T) {
 		assert.Equal(t, 2048.0, rows[0].RSSBytes)
 		// True RSS was not reported (0), so HasTrueRSS is false and the view renders an em-dash.
 		assert.False(t, rows[0].HasTrueRSS)
+		// fd_limit was not reported (0), so HasFDLimit is false and the FD column renders an em-dash.
+		assert.False(t, rows[0].HasFDLimit)
 	})
 }
 

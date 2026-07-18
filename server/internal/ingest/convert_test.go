@@ -181,6 +181,9 @@ func TestInstanceWindowToRow(t *testing.T) {
 		Gomaxprocs:      8,
 		PostGcHeapBytes: 700,
 		RssTrueBytes:    4096,
+		OpenFds:         220,
+		FdLimit:         1024,
+		InFlight:        12,
 	}
 	row, ok := instanceWindowToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1", iw, now)
 	require.True(t, ok)
@@ -200,6 +203,9 @@ func TestInstanceWindowToRow(t *testing.T) {
 	assert.Equal(t, uint32(8), row.GOMAXPROCS)
 	assert.Equal(t, uint64(700), row.PostGCHeapBytes)
 	assert.Equal(t, uint64(4096), row.RSSTrueBytes)
+	assert.Equal(t, uint64(220), row.OpenFDs)
+	assert.Equal(t, uint64(1024), row.FDLimit)
+	assert.Equal(t, uint64(12), row.InFlight)
 }
 
 func TestInstanceWindowToRowRejectsSkewAndNil(t *testing.T) {

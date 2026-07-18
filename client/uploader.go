@@ -225,7 +225,7 @@ func (r *Recorder) buildRequest(window map[seriesKey]*series, end time.Time) *ma
 	// Attach one per-window resource snapshot (USE gauges) so saturation can be
 	// correlated with the RED metrics in the same upload. Sampled here on the
 	// uploader goroutine, matching the window the summaries cover.
-	instanceWindows := []*mapingv1.InstanceWindow{r.sampler.sample(end.Add(-r.cfg.FlushWindow), end)}
+	instanceWindows := []*mapingv1.InstanceWindow{r.sampler.sample(end.Add(-r.cfg.FlushWindow), end, r.takeInFlightPeak())}
 
 	return &mapingv1.UploadRequest{
 		InstanceWindows: instanceWindows,

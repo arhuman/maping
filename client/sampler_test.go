@@ -10,7 +10,7 @@ import (
 
 func TestSamplerFirstSampleHasZeroDeltas(t *testing.T) {
 	var s sampler
-	iw := s.sample(time.UnixMilli(1000), time.UnixMilli(11000))
+	iw := s.sample(time.UnixMilli(1000), time.UnixMilli(11000), 7)
 
 	assert.Equal(t, int64(1000), iw.GetWindowStartMs())
 	assert.Equal(t, int64(11000), iw.GetWindowEndMs())
@@ -36,15 +36,26 @@ func TestSamplerFirstSampleHasZeroDeltas(t *testing.T) {
 	} else {
 		assert.Zero(t, iw.GetRssTrueBytes(), "true RSS is 0 on non-Linux hosts")
 	}
+	// open_fds and fd_limit are best-effort per OS: Linux reads /proc/self/fd and
+	// RLIMIT_NOFILE, other hosts report 0.
+	if runtime.GOOS == "linux" {
+		assert.Positive(t, iw.GetOpenFds(), "Linux counts entries in /proc/self/fd")
+		assert.Positive(t, iw.GetFdLimit(), "Linux reads the soft RLIMIT_NOFILE ceiling")
+	} else {
+		assert.Zero(t, iw.GetOpenFds(), "open_fds is 0 on non-Linux hosts")
+		assert.Zero(t, iw.GetFdLimit(), "fd_limit is 0 on non-Linux hosts")
+	}
+	// in_flight is the peak concurrency passed in by the caller (recorder-owned).
+	assert.Equal(t, uint64(7), iw.GetInFlight(), "in_flight is the peak passed to sample")
 	assert.True(t, s.primed, "the first sample primes the sampler")
 }
 
 func TestSamplerSecondSampleDeltasAreMonotonic(t *testing.T) {
 	var s sampler
-	s.sample(time.UnixMilli(0), time.UnixMilli(1))
+	s.sample(time.UnixMilli(0), time.UnixMilli(1), 0)
 	prevPause := s.prevPauseTotalNs
 
-	iw := s.sample(time.UnixMilli(1), time.UnixMilli(2))
+	iw := s.sample(time.UnixMilli(1), time.UnixMilli(2), 0)
 	// Deltas come from monotonic runtime counters, so the second window's GC-pause
 	// delta equals the advance of the cumulative total since the first sample.
 	assert.Equal(t, s.prevPauseTotalNs-prevPause, iw.GetGcPauseNs())

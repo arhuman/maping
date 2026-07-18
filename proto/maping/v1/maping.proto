@@ -193,6 +193,18 @@ message InstanceWindow {
   // unlike rss_bytes which is runtime Sys (reserved address space). Best-effort:
   // 0 on platforms where it is not wired up. Point-in-time gauge.
   uint64 rss_true_bytes = 15;
+  // open_fds is the count of open file descriptors (Linux /proc/self/fd entries).
+  // A rising count proxies leaking or accumulating connections/files. Best-effort:
+  // 0 on platforms where it is not wired up. Point-in-time gauge.
+  uint64 open_fds = 16;
+  // fd_limit is the soft RLIMIT_NOFILE ceiling, so nearness to the limit ("open_fds
+  // over fd_limit") is computable. Best-effort: 0 on platforms where it is not
+  // wired up. Point-in-time gauge.
+  uint64 fd_limit = 17;
+  // in_flight is the PEAK number of requests in flight during the window, tracked
+  // by the recorder as adapters enter/leave each handler. It shows the process
+  // backing up (blocked, not busy) when latency rises but CPU/GC stay flat.
+  uint64 in_flight = 18;
 }
 
 message UploadResponse {

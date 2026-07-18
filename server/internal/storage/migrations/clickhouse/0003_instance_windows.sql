@@ -19,6 +19,10 @@
 -- post_gc_heap_bytes (live heap at the last GC mark, the post-GC baseline) and
 -- rss_true_bytes (true OS resident set size) are point-in-time gauges added the
 -- same way: declared here for fresh DBs; 0005 ADDs them to an existing dev DB.
+--
+-- open_fds / fd_limit (open file-descriptor count and the soft RLIMIT_NOFILE
+-- ceiling) and in_flight (peak request concurrency) are congestion gauges added
+-- the same way: declared here for fresh DBs; 0006 ADDs them to an existing dev DB.
 
 CREATE TABLE IF NOT EXISTS instance_windows
 (
@@ -39,7 +43,10 @@ CREATE TABLE IF NOT EXISTS instance_windows
     heap_inuse_bytes  UInt64,
     gomaxprocs        UInt32,
     post_gc_heap_bytes UInt64,
-    rss_true_bytes     UInt64
+    rss_true_bytes     UInt64,
+    open_fds           UInt64,
+    fd_limit           UInt64,
+    in_flight          UInt64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)

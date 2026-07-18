@@ -131,6 +131,9 @@ func instanceWindowToRow(
 		GOMAXPROCS:      iw.GetGomaxprocs(),
 		PostGCHeapBytes: iw.GetPostGcHeapBytes(),
 		RSSTrueBytes:    iw.GetRssTrueBytes(),
+		OpenFDs:         iw.GetOpenFds(),
+		FDLimit:         iw.GetFdLimit(),
+		InFlight:        iw.GetInFlight(),
 	}, true
 }
 

@@ -598,3 +598,29 @@ func TestShutdownContextExpired(t *testing.T) {
 	err := r.Shutdown(ctx)
 	assert.Error(t, err, "Shutdown must return ctx error when drain times out")
 }
+
+// TestBeginRequestTracksPeak verifies BeginRequest counts in-flight concurrency
+// and that takeInFlightPeak returns the window high-water mark, then resets the
+// peak to the LIVE in-flight count so the next window does not falsely dip to
+// zero while work is still ongoing.
+func TestBeginRequestTracksPeak(t *testing.T) {
+	var r Recorder // zero-value (no-op) recorder: the counter still works
+
+	// Begin three requests without finishing any: peak reaches 3.
+	d1 := r.BeginRequest()
+	d2 := r.BeginRequest()
+	d3 := r.BeginRequest()
+	assert.Equal(t, uint64(3), r.takeInFlightPeak(), "peak concurrency is 3 with 3 in flight")
+
+	// take-and-reset leaves the peak at the live in-flight count (still 3), so an
+	// immediate re-read reports the current level, not zero.
+	assert.Equal(t, uint64(3), r.takeInFlightPeak(), "peak resets to the live in-flight count")
+
+	// Finish all three. The window that still held them reports peak 3 (the peak is
+	// retained until a take consumes it), and only the window AFTER that falls to 0.
+	d1()
+	d2()
+	d3()
+	assert.Equal(t, uint64(3), r.takeInFlightPeak(), "the window that held 3 still records peak 3")
+	assert.Equal(t, uint64(0), r.takeInFlightPeak(), "the next window falls to 0 once all requests are done")
+}

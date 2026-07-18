@@ -43,6 +43,10 @@ func Middleware(opts ...maping.Option) echo.MiddlewareFunc {
 func MiddlewareWithRecorder(rec *maping.Recorder) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			// Count this request in flight for the window peak-concurrency gauge, and
+			// mark it done when the handler returns.
+			defer rec.BeginRequest()()
+
 			// Install the downstream-time accumulator so a maping.RoundTripper on the
 			// host's outbound http.Client can attribute round-trip time to this
 			// request. It is inert unless the host wires the RoundTripper and

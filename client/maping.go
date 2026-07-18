@@ -109,6 +109,13 @@ type Recorder struct {
 	// state has been drained: once set, Observe is a cheap no-op.
 	closed atomic.Bool
 
+	// inFlight is the current number of requests in flight; inFlightPeak is the
+	// high-water mark since the last sample. Adapters bump them via BeginRequest,
+	// and the sampler takes-and-resets the peak per window for the in_flight gauge.
+	// Both are safe on a no-op recorder (they just count harmlessly).
+	inFlight     atomic.Int64
+	inFlightPeak atomic.Int64
+
 	stop     chan struct{}
 	stopOnce sync.Once
 	done     chan struct{}
@@ -229,6 +236,29 @@ func (r *Recorder) Observe(rec Record) {
 		s.sumDownstreamNs += uint64(rec.DownstreamDuration.Nanoseconds())
 	}
 	s.observeExemplar(rec, exemplarOf(rec, time.Now()))
+}
+
+// BeginRequest marks a request as in flight and returns a function that marks
+// it done; adapters call `defer rec.BeginRequest()()` at handler entry. It
+// tracks the window peak concurrency for the InstanceWindow in_flight gauge.
+// Safe on a no-op recorder and for concurrent use.
+func (r *Recorder) BeginRequest() func() {
+	n := r.inFlight.Add(1)
+	for {
+		p := r.inFlightPeak.Load()
+		if n <= p || r.inFlightPeak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	return func() { r.inFlight.Add(-1) }
+}
+
+// takeInFlightPeak atomically reads the window's peak concurrency and resets the
+// peak to the current in-flight count, so the next window starts from the live
+// value rather than zero (avoiding a false dip while work is ongoing). Called by
+// the sampler once per flush window.
+func (r *Recorder) takeInFlightPeak() uint64 {
+	return uint64(r.inFlightPeak.Swap(r.inFlight.Load()))
 }
 
 // recordCode bumps an exact status code, bounded to maxStatusCodes distinct

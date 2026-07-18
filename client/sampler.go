@@ -35,7 +35,9 @@ type sampler struct {
 // point-in-time reads. ReadMemStats stops the world briefly but only once per
 // flush window (seconds apart), so its cost is negligible against the flush; the
 // extra metrics.Read for the post-GC heap baseline is on the same seconds-apart path.
-func (s *sampler) sample(start, end time.Time) *mapingv1.InstanceWindow {
+// inFlight is the window's peak request concurrency, taken and reset by the caller
+// (the recorder owns the counter, not the sampler).
+func (s *sampler) sample(start, end time.Time, inFlight uint64) *mapingv1.InstanceWindow {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	cpu := cpuTimeNs()
@@ -66,6 +68,8 @@ func (s *sampler) sample(start, end time.Time) *mapingv1.InstanceWindow {
 	s.prevMallocs = ms.Mallocs
 	s.primed = true
 
+	openFds, fdLimit := fdStats()
+
 	return &mapingv1.InstanceWindow{
 		WindowStartMs:   start.UnixMilli(),
 		WindowEndMs:     end.UnixMilli(),
@@ -82,5 +86,8 @@ func (s *sampler) sample(start, end time.Time) *mapingv1.InstanceWindow {
 		Gomaxprocs:      uint32(runtime.GOMAXPROCS(0)),
 		PostGcHeapBytes: postGCHeap,
 		RssTrueBytes:    rssBytes(),
+		OpenFds:         openFds,
+		FdLimit:         fdLimit,
+		InFlight:        inFlight,
 	}
 }

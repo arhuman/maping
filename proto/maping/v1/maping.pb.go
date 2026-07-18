@@ -686,7 +686,19 @@ type InstanceWindow struct {
 	// rss_true_bytes is true resident set size from the OS (Linux /proc/self/statm),
 	// unlike rss_bytes which is runtime Sys (reserved address space). Best-effort:
 	// 0 on platforms where it is not wired up. Point-in-time gauge.
-	RssTrueBytes  uint64 `protobuf:"varint,15,opt,name=rss_true_bytes,json=rssTrueBytes,proto3" json:"rss_true_bytes,omitempty"`
+	RssTrueBytes uint64 `protobuf:"varint,15,opt,name=rss_true_bytes,json=rssTrueBytes,proto3" json:"rss_true_bytes,omitempty"`
+	// open_fds is the count of open file descriptors (Linux /proc/self/fd entries).
+	// A rising count proxies leaking or accumulating connections/files. Best-effort:
+	// 0 on platforms where it is not wired up. Point-in-time gauge.
+	OpenFds uint64 `protobuf:"varint,16,opt,name=open_fds,json=openFds,proto3" json:"open_fds,omitempty"`
+	// fd_limit is the soft RLIMIT_NOFILE ceiling, so nearness to the limit ("open_fds
+	// over fd_limit") is computable. Best-effort: 0 on platforms where it is not
+	// wired up. Point-in-time gauge.
+	FdLimit uint64 `protobuf:"varint,17,opt,name=fd_limit,json=fdLimit,proto3" json:"fd_limit,omitempty"`
+	// in_flight is the PEAK number of requests in flight during the window, tracked
+	// by the recorder as adapters enter/leave each handler. It shows the process
+	// backing up (blocked, not busy) when latency rises but CPU/GC stay flat.
+	InFlight      uint64 `protobuf:"varint,18,opt,name=in_flight,json=inFlight,proto3" json:"in_flight,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -822,6 +834,27 @@ func (x *InstanceWindow) GetPostGcHeapBytes() uint64 {
 func (x *InstanceWindow) GetRssTrueBytes() uint64 {
 	if x != nil {
 		return x.RssTrueBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetOpenFds() uint64 {
+	if x != nil {
+		return x.OpenFds
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetFdLimit() uint64 {
+	if x != nil {
+		return x.FdLimit
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetInFlight() uint64 {
+	if x != nil {
+		return x.InFlight
 	}
 	return 0
 }
@@ -1078,7 +1111,7 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\rUploadRequest\x12/\n" +
 	"\benvelope\x18\x01 \x01(\v2\x13.maping.v1.EnvelopeR\benvelope\x120\n" +
 	"\tsummaries\x18\x02 \x03(\v2\x12.maping.v1.SummaryR\tsummaries\x12D\n" +
-	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\x9c\x04\n" +
+	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\xef\x04\n" +
 	"\x0eInstanceWindow\x12&\n" +
 	"\x0fwindow_start_ms\x18\x01 \x01(\x03R\rwindowStartMs\x12\"\n" +
 	"\rwindow_end_ms\x18\x02 \x01(\x03R\vwindowEndMs\x12\x15\n" +
@@ -1099,7 +1132,10 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"gomaxprocs\x18\r \x01(\rR\n" +
 	"gomaxprocs\x12+\n" +
 	"\x12post_gc_heap_bytes\x18\x0e \x01(\x04R\x0fpostGcHeapBytes\x12$\n" +
-	"\x0erss_true_bytes\x18\x0f \x01(\x04R\frssTrueBytes\"s\n" +
+	"\x0erss_true_bytes\x18\x0f \x01(\x04R\frssTrueBytes\x12\x19\n" +
+	"\bopen_fds\x18\x10 \x01(\x04R\aopenFds\x12\x19\n" +
+	"\bfd_limit\x18\x11 \x01(\x04R\afdLimit\x12\x1b\n" +
+	"\tin_flight\x18\x12 \x01(\x04R\binFlight\"s\n" +
 	"\x0eUploadResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12-\n" +

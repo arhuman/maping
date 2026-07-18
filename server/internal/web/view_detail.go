@@ -393,6 +393,10 @@ type resourceRow struct {
 	PostGCHeap    float64 // peak post-GC live-heap baseline, in bytes (for the bytes fmt)
 	TrueRSSBytes  float64 // peak true OS resident set size, in bytes (for the bytes fmt)
 	HasTrueRSS    bool    // false when rss_true_bytes is 0 (unavailable, non-Linux host)
+	OpenFDs       uint64  // peak open file-descriptor count over the window
+	FDLimit       uint64  // peak soft RLIMIT_NOFILE ceiling over the window
+	HasFDLimit    bool    // false when fd_limit is 0 (unavailable, non-Linux host)
+	InFlight      uint64  // peak in-flight request concurrency over the window
 }
 
 // toResourceRows maps the storage per-instance USE stats into display rows,
@@ -404,8 +408,10 @@ type resourceRow struct {
 // share is clamped to [0,1]. Byte gauges become float64 for the bytes formatter;
 // the post-GC heap baseline and true RSS ride along as peak byte gauges, with
 // HasTrueRSS false when true RSS is 0 (unavailable on a non-Linux host) so the view
-// can render an em-dash rather than a misleading "0 B". Storage order (by instance)
-// is preserved.
+// can render an em-dash rather than a misleading "0 B". The open-fd count, its
+// limit, and the peak in-flight concurrency ride along the same way, with
+// HasFDLimit false when fd_limit is 0 (unavailable) so the FD column renders an
+// em-dash. Storage order (by instance) is preserved.
 func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []resourceRow {
 	out := make([]resourceRow, 0, len(stats))
 	for _, s := range stats {
@@ -438,6 +444,10 @@ func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []
 			PostGCHeap:    float64(s.PostGCHeapBytes),
 			TrueRSSBytes:  float64(s.RSSTrueBytes),
 			HasTrueRSS:    s.RSSTrueBytes > 0,
+			OpenFDs:       s.OpenFDs,
+			FDLimit:       s.FDLimit,
+			HasFDLimit:    s.FDLimit > 0,
+			InFlight:      s.InFlight,
 		})
 	}
 	return out

@@ -33,7 +33,7 @@ const instanceWindowInsertStmt = `INSERT INTO instance_windows (
     tenant, service, instance, window_start, window_end,
     cpu_ns, rss_bytes, heap_alloc_bytes, gc_pause_ns, goroutines,
     num_gc, total_alloc_bytes, mallocs, gc_cpu_fraction, heap_inuse_bytes, gomaxprocs,
-    post_gc_heap_bytes, rss_true_bytes
+    post_gc_heap_bytes, rss_true_bytes, open_fds, fd_limit, in_flight
 )`
 
 // ErrWriterClosed is returned by Enqueue after Close has been called.
@@ -336,7 +336,7 @@ func (w *Writer) insertInstanceWindows(ctx context.Context, rows []InstanceWindo
 			r.Tenant.String(), r.Service, r.Instance, r.WindowStart, r.WindowEnd,
 			r.CPUNs, r.RSSBytes, r.HeapAllocBytes, r.GCPauseNs, r.Goroutines,
 			r.NumGC, r.TotalAllocBytes, r.Mallocs, r.GCCPUFraction, r.HeapInuseBytes, r.GOMAXPROCS,
-			r.PostGCHeapBytes, r.RSSTrueBytes,
+			r.PostGCHeapBytes, r.RSSTrueBytes, r.OpenFDs, r.FDLimit, r.InFlight,
 		); err != nil {
 			return fmt.Errorf("append instance-window row: %w", err)
 		}

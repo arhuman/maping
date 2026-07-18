@@ -48,6 +48,10 @@ func Middleware(opts ...maping.Option) func(http.Handler) http.Handler {
 func MiddlewareWithRecorder(rec *maping.Recorder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Count this request in flight for the window peak-concurrency gauge, and
+			// mark it done when the handler returns.
+			defer rec.BeginRequest()()
+
 			// Install the downstream-time accumulator so a maping.RoundTripper on the
 			// host's outbound http.Client can attribute round-trip time to this
 			// request. It is inert unless the host wires the RoundTripper and
