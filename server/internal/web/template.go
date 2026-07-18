@@ -77,6 +77,8 @@ type detailData struct {
 	NoStatusReasons []noStatusReasonRow
 	Downstream      downstreamView
 	Resources       []resourceRow
+	MemoryVerdict   memoryVerdict
+	MemoryChart     template.HTML
 }
 
 // handshakeView feeds the live handshake stepper partial ("handshake-stepper"),

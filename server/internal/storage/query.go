@@ -222,6 +222,17 @@ func (q TenantQuery) InstanceResourcesForService(
 	return InstanceResourcesForService(ctx, q.s.conn, q.tenant, service, from, to)
 }
 
+// MemoryTrendForService forwards to the package-level per-window memory trend for
+// the bound tenant.
+func (q TenantQuery) MemoryTrendForService(
+	ctx context.Context,
+	service string,
+	from, to time.Time,
+	step time.Duration,
+) ([]MemoryTrendPoint, error) {
+	return MemoryTrendForService(ctx, q.s.conn, q.tenant, service, from, to, step)
+}
+
 // DownstreamForEndpoint forwards to the package-level self-vs-downstream time
 // split for the bound tenant.
 func (q TenantQuery) DownstreamForEndpoint(

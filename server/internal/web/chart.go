@@ -137,6 +137,67 @@ func histogramSVG(bars []storage.HistogramBar, p50, p95, p99 float64) template.H
 	return template.HTML(b.String())
 }
 
+// memoryTrendSVG draws the per-window fleet memory trend: peak post-GC live heap
+// (accent, the leak-vs-burst signal) as the primary line and peak in-use heap
+// (muted, secondary) over the same window as the timeline, on a shared byte y-axis.
+// A climbing-and-held post-GC line is the visual leak; a spike that returns is a
+// burst. Fewer than two points cannot form a line, so it renders an empty frame.
+// The x-axis is index-based (one slot per bucket), so the step is not needed; the
+// param keeps the signature parallel to timeSeriesSVG and marks the shared window.
+func memoryTrendSVG(points []storage.MemoryTrendPoint, _ time.Duration) template.HTML {
+	const (
+		w, hgt         = 560.0, 210.0
+		pL, pR, pT, pB = 62.0, 12.0, 14.0, 20.0
+	)
+	if len(points) < 2 {
+		return emptyChart(w, hgt, "no memory data yet")
+	}
+	n := len(points)
+	postGC := make([]float64, n)
+	inuse := make([]float64, n)
+	var vMax float64
+	for i, p := range points {
+		postGC[i] = float64(p.PostGCHeapBytes)
+		inuse[i] = float64(p.HeapInuseBytes)
+		if postGC[i] > vMax {
+			vMax = postGC[i]
+		}
+		if inuse[i] > vMax {
+			vMax = inuse[i]
+		}
+	}
+	vMax *= 1.15
+	if vMax <= 0 {
+		vMax = 1
+	}
+	x := func(i int) float64 { return pL + float64(i)*(w-pL-pR)/float64(n-1) }
+	y := func(v float64) float64 { return hgt - pB - (v/vMax)*(hgt-pT-pB) }
+
+	var b strings.Builder
+	fmt.Fprintf(&b, `<svg viewBox="0 0 %g %g" width="100%%" style="display:block;height:auto">`, w, hgt)
+	b.WriteString(`<defs><linearGradient id="mt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#B4F14A" stop-opacity="0.20"></stop><stop offset="100%" stop-color="#B4F14A" stop-opacity="0"></stop></linearGradient></defs>`)
+	for g := 0; g <= 3; g++ {
+		gy := pT + float64(g)*(hgt-pT-pB)/3
+		fmt.Fprintf(&b, `<line x1="%g" y1="%.1f" x2="%.1f" y2="%.1f" stroke="rgba(255,255,255,.055)" stroke-width="1"></line>`, pL, gy, w-pR, gy)
+		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" text-anchor="end" fill="#69727F" style="font:500 9px var(--mono)">%s</text>`, pL-8, gy+3, bytesLabel(vMax*(1-float64(g)/3)))
+	}
+	pgLine := svgPath(x, y, postGC)
+	fmt.Fprintf(&b, `<path d="%s L%.1f,%.1f L%.1f,%.1f Z" fill="url(#mt)"></path>`, pgLine, x(n-1), hgt-pB, pL, hgt-pB)
+	fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="#69727F" stroke-width="1.6" stroke-dasharray="4 3" stroke-linejoin="round"></path>`, svgPath(x, y, inuse))
+	fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="#B4F14A" stroke-width="2" stroke-linejoin="round"></path>`, pgLine)
+	b.WriteString(`</svg>`)
+	return template.HTML(b.String())
+}
+
+// bytesLabel renders a byte value as a compact axis label, reusing the shared
+// 1024-based byte formatter ("240 MB").
+func bytesLabel(v float64) string {
+	if v < 0 {
+		v = 0
+	}
+	return fmtBytes(v)
+}
+
 // svgPath builds an "M/L x,y" polyline path from the mapped points.
 func svgPath(x func(int) float64, y func(float64) float64, vals []float64) string {
 	var b strings.Builder

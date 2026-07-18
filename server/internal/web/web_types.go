@@ -35,6 +35,7 @@ type ScopedQuery interface {
 	NoStatusReasonsForEndpoint(ctx context.Context, service, method, route string, from, to time.Time) ([]storage.NoStatusReasonStat, error)
 	DownstreamForEndpoint(ctx context.Context, service, method, route string, from, to time.Time) (storage.DownstreamStat, error)
 	InstanceResourcesForService(ctx context.Context, service string, from, to time.Time) ([]storage.InstanceResourceStat, error)
+	MemoryTrendForService(ctx context.Context, service string, from, to time.Time, step time.Duration) ([]storage.MemoryTrendPoint, error)
 	PerformanceStats(ctx context.Context, from, to time.Time) (storage.PerformanceStat, error)
 	HasAnySummary(ctx context.Context) (bool, error)
 }

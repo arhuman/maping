@@ -71,6 +71,9 @@ func (nopScopedQuery) DownstreamForEndpoint(context.Context, string, string, str
 func (nopScopedQuery) InstanceResourcesForService(context.Context, string, time.Time, time.Time) ([]storage.InstanceResourceStat, error) {
 	return nil, nil
 }
+func (nopScopedQuery) MemoryTrendForService(context.Context, string, time.Time, time.Time, time.Duration) ([]storage.MemoryTrendPoint, error) {
+	return nil, nil
+}
 func (nopScopedQuery) PerformanceStats(context.Context, time.Time, time.Time) (storage.PerformanceStat, error) {
 	return storage.PerformanceStat{}, nil
 }

@@ -45,6 +45,15 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 	dv := toDetailView(detail)
 	winSec := to.Sub(from).Seconds()
 	verdict := computeVerdict(dv, p.baseline, winSec)
+
+	// The leak/burst read is a standalone card in the diagnostic disclosure. A
+	// leak can present as a flat-RED banner (steady errors, no latency change), so
+	// a Leak/Burst signal OR-s the disclosure open to surface the card — without
+	// touching the health banner's own level/headline/sentence.
+	mv := computeMemoryVerdict(p.memory)
+	if mv.Level == "Leak" || mv.Level == "Burst" {
+		verdict.Open = true
+	}
 	crumbs := []crumb{{Label: "services", Href: withWin("/", winKey)}, {Label: service, Href: withWin("/services/"+service, winKey)}, {Label: method + " " + route}}
 	h.render(w, "detail", detailData{
 		Shell:           h.buildShell(r, "overview", crumbs, method+" "+route, true, winKey),
@@ -67,6 +76,8 @@ func (h *Handler) serveEndpointDetail(w http.ResponseWriter, r *http.Request) {
 		NoStatusReasons: toNoStatusReasonRows(p.noStatusReasons),
 		Downstream:      toDownstreamView(p.downstream),
 		Resources:       toResourceRows(p.resources, winSec),
+		MemoryVerdict:   mv,
+		MemoryChart:     memoryTrendSVG(p.memory, step),
 	})
 }
 
@@ -83,6 +94,7 @@ type detailPanels struct {
 	noStatusReasons []storage.NoStatusReasonStat
 	downstream      storage.DownstreamStat
 	resources       []storage.InstanceResourceStat
+	memory          []storage.MemoryTrendPoint
 }
 
 // loadDetailPanels runs the nine independent secondary detail queries
@@ -151,6 +163,13 @@ func (h *Handler) loadDetailPanels(ctx context.Context, tq ScopedQuery, service,
 	run(func() {
 		p.resources = softQuery(ctx, h, "instance-resources", func(ctx context.Context) ([]storage.InstanceResourceStat, error) {
 			return tq.InstanceResourcesForService(ctx, service, from, to)
+		})
+	})
+	run(func() {
+		// Memory trend reads the SAME [from, to, step] as the series panel so heap
+		// and latency line up over one window (leak-vs-burst reads the chart range).
+		p.memory = softQuery(ctx, h, "memory-trend", func(ctx context.Context) ([]storage.MemoryTrendPoint, error) {
+			return tq.MemoryTrendForService(ctx, service, from, to, step)
 		})
 	})
 	wg.Wait()

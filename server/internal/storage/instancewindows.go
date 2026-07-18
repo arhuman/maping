@@ -113,3 +113,62 @@ func InstanceResourcesForService(
 		}
 	})
 }
+
+// MemoryTrendPoint is one time-bucket of the service's fleet memory: the peak
+// post-GC live heap (the leak-vs-burst signal) and peak in-use heap over the
+// bucket, across every instance/sample. Memory is a per-process property of the
+// instances serving the service (instance_windows has no endpoint dimension), so
+// this trend is service-scoped, not per-endpoint.
+type MemoryTrendPoint struct {
+	TS              time.Time
+	PostGCHeapBytes uint64
+	HeapInuseBytes  uint64
+}
+
+// memoryTrendQueryTemplate buckets instance_windows by the query step and takes
+// the fleet peak (max over every instance and sample in the bucket) of the two
+// heap gauges. A leak shows as the peak post-GC heap climbing bucket-over-bucket;
+// a burst shows as a peak that spikes and returns. It is service-scoped (memory
+// is per-process, not per-endpoint), tenant-scoped, and half-open over the window.
+// The step is a ?-bound integer second count, never string-interpolated.
+const memoryTrendQueryTemplate = `
+SELECT
+    toStartOfInterval(window_start, INTERVAL ? second) AS bucket,
+    max(post_gc_heap_bytes) AS post_gc_heap_bytes,
+    max(heap_inuse_bytes)   AS heap_inuse_bytes
+FROM instance_windows
+WHERE tenant = ?
+  AND service = ?
+  AND window_start >= ?
+  AND window_start < ?
+GROUP BY bucket
+ORDER BY bucket`
+
+// MemoryTrendForService returns the per-bucket fleet memory trend for a service
+// over [from, to), bucketed by step, ordered by time. It reads the same
+// [from, to, step] window the detail-page timeline uses so heap and latency line
+// up. step is floored to one second; the caller passes the timeline step.
+func MemoryTrendForService(
+	ctx context.Context,
+	conn driver.Conn,
+	tenantID tenant.ID,
+	service string,
+	from, to time.Time,
+	step time.Duration,
+) ([]MemoryTrendPoint, error) {
+	stepSeconds := int64(step / time.Second)
+	if stepSeconds <= 0 {
+		stepSeconds = 1
+	}
+	rows, err := conn.Query(ctx, memoryTrendQueryTemplate,
+		stepSeconds, tenantID.String(), service, from, to,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("storage.MemoryTrendForService: query: %w", err)
+	}
+	defer rows.Close()
+
+	return scanRows(rows, "MemoryTrendForService", func(p *MemoryTrendPoint) []any {
+		return []any{&p.TS, &p.PostGCHeapBytes, &p.HeapInuseBytes}
+	})
+}

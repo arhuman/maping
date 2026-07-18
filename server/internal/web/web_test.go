@@ -61,6 +61,9 @@ type fakeQuerier struct {
 	resources    []storage.InstanceResourceStat
 	resourcesErr error
 
+	memory    []storage.MemoryTrendPoint
+	memoryErr error
+
 	performance    storage.PerformanceStat
 	performanceErr error
 }
@@ -112,6 +115,9 @@ func (s fakeScopedQuery) DownstreamForEndpoint(context.Context, string, string, 
 }
 func (s fakeScopedQuery) InstanceResourcesForService(context.Context, string, time.Time, time.Time) ([]storage.InstanceResourceStat, error) {
 	return s.f.resources, s.f.resourcesErr
+}
+func (s fakeScopedQuery) MemoryTrendForService(context.Context, string, time.Time, time.Time, time.Duration) ([]storage.MemoryTrendPoint, error) {
+	return s.f.memory, s.f.memoryErr
 }
 func (s fakeScopedQuery) PerformanceStats(context.Context, time.Time, time.Time) (storage.PerformanceStat, error) {
 	return s.f.performance, s.f.performanceErr
