@@ -1,9 +1,9 @@
 connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
 connectrpc.com/connect v1.20.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
-github.com/arhuman/maping/client v0.4.0 h1:EhgfiG7H5ejo4c0x20G2J0L+3TOKBUWNUWEU6WcoIsI=
-github.com/arhuman/maping/client v0.4.0/go.mod h1:/ZuzCGYGqzrogzq6kLEN+a7m4YijF/bLRYdgqXPyUYE=
-github.com/arhuman/maping/proto v0.4.0 h1:mu8K/MltU4Chti9jWOhCdK88MPgR0iWCZI+sZkla0g8=
-github.com/arhuman/maping/proto v0.4.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
+github.com/arhuman/maping/client v0.5.0 h1:cEzGl5FeoJoZB8y8RtC0S9+Wp67DSQGqyYcC/sNryMo=
+github.com/arhuman/maping/client v0.5.0/go.mod h1:yYv+c5oSugyKZKglNKhr/mdVqb8LDGvfpSlER6vtFDU=
+github.com/arhuman/maping/proto v0.5.0 h1:LhPK14G+zGf9uTlSLq2picIYNhgPH0VFHC27gnG13z8=
+github.com/arhuman/maping/proto v0.5.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
 github.com/beego/beego/v2 v2.3.10 h1:53us+Lzc/bwFwjyRi62+FKFEcWiIbmKbhW4/FQ3aNEw=
 github.com/beego/beego/v2 v2.3.10/go.mod h1:IY3bkfRge4Yj2XhgdMuvznM4HK/ovxQLOHJxAJ+QRgo=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
