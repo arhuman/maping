@@ -32,6 +32,8 @@ type InstanceWindowRow struct {
 	GCCPUFraction   float64 // fraction of CPU time in GC since start (gauge, 0..1)
 	HeapInuseBytes  uint64  // in-use heap bytes at sample time (gauge)
 	GOMAXPROCS      uint32  // GOMAXPROCS at sample time (gauge)
+	PostGCHeapBytes uint64  // live heap as of the last GC mark, post-GC baseline (gauge)
+	RSSTrueBytes    uint64  // true resident set size from the OS, 0 if unavailable (gauge)
 }
 
 // InstanceResourceStat is the per-instance resource summary over the query
@@ -51,6 +53,8 @@ type InstanceResourceStat struct {
 	GCCPUFraction   float64 // average GC CPU fraction over the window (gauge avg)
 	HeapInuseBytes  uint64  // peak in-use heap bytes over the window (gauge max)
 	GOMAXPROCS      uint32  // peak GOMAXPROCS over the window (gauge max)
+	PostGCHeapBytes uint64  // peak post-GC heap baseline over the window (gauge max)
+	RSSTrueBytes    uint64  // peak true resident set size over the window (gauge max)
 }
 
 // instanceResourcesQueryTemplate aggregates one row per instance of a service
@@ -71,7 +75,9 @@ SELECT
     sum(mallocs)           AS mallocs,
     avg(gc_cpu_fraction)   AS gc_cpu_fraction,
     max(heap_inuse_bytes)  AS heap_inuse_bytes,
-    max(gomaxprocs)        AS gomaxprocs
+    max(gomaxprocs)        AS gomaxprocs,
+    max(post_gc_heap_bytes) AS post_gc_heap_bytes,
+    max(rss_true_bytes)    AS rss_true_bytes
 FROM instance_windows
 WHERE tenant = ?
   AND service = ?
@@ -103,6 +109,7 @@ func InstanceResourcesForService(
 		return []any{
 			&s.Instance, &s.CPUNs, &s.RSSBytes, &s.HeapAllocBytes, &s.GCPauseNs, &s.Goroutines,
 			&s.NumGC, &s.TotalAllocBytes, &s.Mallocs, &s.GCCPUFraction, &s.HeapInuseBytes, &s.GOMAXPROCS,
+			&s.PostGCHeapBytes, &s.RSSTrueBytes,
 		}
 	})
 }

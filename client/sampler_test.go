@@ -1,6 +1,7 @@
 package maping
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,6 +26,16 @@ func TestSamplerFirstSampleHasZeroDeltas(t *testing.T) {
 	assert.Positive(t, iw.GetHeapAllocBytes(), "a running program has live heap")
 	assert.Positive(t, iw.GetHeapInuseBytes(), "a running program has in-use heap")
 	assert.Positive(t, iw.GetGomaxprocs(), "GOMAXPROCS is at least 1")
+	// post_gc_heap_bytes is a live gauge from runtime/metrics; a just-started process
+	// may not have completed a GC yet, so its value is nondeterministic. Exercise the
+	// read path without asserting a specific value.
+	_ = iw.GetPostGcHeapBytes()
+	// rss_true_bytes is best-effort per OS: true RSS on Linux, 0 elsewhere.
+	if runtime.GOOS == "linux" {
+		assert.Positive(t, iw.GetRssTrueBytes(), "Linux reads true RSS from /proc/self/statm")
+	} else {
+		assert.Zero(t, iw.GetRssTrueBytes(), "true RSS is 0 on non-Linux hosts")
+	}
 	assert.True(t, s.primed, "the first sample primes the sampler")
 }
 

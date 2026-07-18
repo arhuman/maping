@@ -179,6 +179,8 @@ func TestInstanceWindowToRow(t *testing.T) {
 		GcCpuFraction:   0.12,
 		HeapInuseBytes:  900,
 		Gomaxprocs:      8,
+		PostGcHeapBytes: 700,
+		RssTrueBytes:    4096,
 	}
 	row, ok := instanceWindowToRow(tenant.MustParse("dev-tenant"), "checkout-api", "pod-1", iw, now)
 	require.True(t, ok)
@@ -196,6 +198,8 @@ func TestInstanceWindowToRow(t *testing.T) {
 	assert.InDelta(t, 0.12, row.GCCPUFraction, 1e-9)
 	assert.Equal(t, uint64(900), row.HeapInuseBytes)
 	assert.Equal(t, uint32(8), row.GOMAXPROCS)
+	assert.Equal(t, uint64(700), row.PostGCHeapBytes)
+	assert.Equal(t, uint64(4096), row.RSSTrueBytes)
 }
 
 func TestInstanceWindowToRowRejectsSkewAndNil(t *testing.T) {

@@ -196,11 +196,11 @@ const tplDetailHTML = `
   {{if .Resources}}
   <div class="panel" style="overflow:hidden;margin-top:18px;">
     <div style="padding:16px 20px 4px;"><span style="font-size:13.5px;font-weight:700;">Resources</span><span style="font:500 11px var(--mono);color:var(--txt-3);margin-left:10px;">saturation per instance — GC or goroutines behind a slowdown?</span></div>
-    <div class="thead" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;">
-      <span>INSTANCE</span><span style="text-align:right;">CPU</span><span style="text-align:right;">GC</span><span style="text-align:right;">RSS</span><span style="text-align:right;">HEAP</span><span style="text-align:right;">GOROUTINES</span><span style="text-align:right;">GC/s</span><span style="text-align:right;">GC CPU</span><span style="text-align:right;">ALLOC/s</span><span style="text-align:right;">AVG ALLOC</span>
+    <div class="thead" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;">
+      <span>INSTANCE</span><span style="text-align:right;">CPU</span><span style="text-align:right;">GC</span><span style="text-align:right;">RSS</span><span style="text-align:right;">HEAP</span><span style="text-align:right;">GOROUTINES</span><span style="text-align:right;">GC/s</span><span style="text-align:right;">GC CPU</span><span style="text-align:right;">ALLOC/s</span><span style="text-align:right;">AVG ALLOC</span><span style="text-align:right;">POST-GC HEAP</span><span style="text-align:right;">TRUE RSS</span>
     </div>
     {{range .Resources}}
-    <div class="trow" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;cursor:default;">
+    <div class="trow" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;cursor:default;">
       <div style="font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{.Instance}}</div>
       <div class="tnum-s">{{fmtCores .CoresUsed}}</div>
       <div class="tnum-s">{{pctd .GCShare}}</div>
@@ -211,6 +211,8 @@ const tplDetailHTML = `
       <div class="tnum-s">{{pctd .GCCPUFraction}}</div>
       <div class="tnum-s">{{bytes .AllocRate}}/s</div>
       <div class="tnum-s">{{bytes .AvgAllocSize}}</div>
+      <div class="tnum-s">{{bytes .PostGCHeap}}</div>
+      <div class="tnum-s">{{if .HasTrueRSS}}{{bytes .TrueRSSBytes}}{{else}}—{{end}}</div>
     </div>
     {{end}}
   </div>

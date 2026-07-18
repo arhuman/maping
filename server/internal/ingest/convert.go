@@ -129,6 +129,8 @@ func instanceWindowToRow(
 		GCCPUFraction:   iw.GetGcCpuFraction(),
 		HeapInuseBytes:  iw.GetHeapInuseBytes(),
 		GOMAXPROCS:      iw.GetGomaxprocs(),
+		PostGCHeapBytes: iw.GetPostGcHeapBytes(),
+		RSSTrueBytes:    iw.GetRssTrueBytes(),
 	}, true
 }
 

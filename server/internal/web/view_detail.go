@@ -390,6 +390,9 @@ type resourceRow struct {
 	GCCPUFraction float64 // fraction of CPU time in GC, 0..1 (for pctd)
 	AllocRate     float64 // heap bytes allocated per second (total_alloc / winSeconds)
 	AvgAllocSize  float64 // average allocation size in bytes (total_alloc / mallocs)
+	PostGCHeap    float64 // peak post-GC live-heap baseline, in bytes (for the bytes fmt)
+	TrueRSSBytes  float64 // peak true OS resident set size, in bytes (for the bytes fmt)
+	HasTrueRSS    bool    // false when rss_true_bytes is 0 (unavailable, non-Linux host)
 }
 
 // toResourceRows maps the storage per-instance USE stats into display rows,
@@ -398,8 +401,11 @@ type resourceRow struct {
 // deltas become rates over the window (GC frequency, allocation rate), and the
 // per-object average allocation size is total_alloc / mallocs (guarded against a
 // zero malloc count). A non-positive window yields zero intensities/rates, and GC
-// share is clamped to [0,1]. Byte gauges become float64 for the bytes formatter.
-// Storage order (by instance) is preserved.
+// share is clamped to [0,1]. Byte gauges become float64 for the bytes formatter;
+// the post-GC heap baseline and true RSS ride along as peak byte gauges, with
+// HasTrueRSS false when true RSS is 0 (unavailable on a non-Linux host) so the view
+// can render an em-dash rather than a misleading "0 B". Storage order (by instance)
+// is preserved.
 func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []resourceRow {
 	out := make([]resourceRow, 0, len(stats))
 	for _, s := range stats {
@@ -429,6 +435,9 @@ func toResourceRows(stats []storage.InstanceResourceStat, winSeconds float64) []
 			GCCPUFraction: s.GCCPUFraction,
 			AllocRate:     allocRate,
 			AvgAllocSize:  avgAlloc,
+			PostGCHeap:    float64(s.PostGCHeapBytes),
+			TrueRSSBytes:  float64(s.RSSTrueBytes),
+			HasTrueRSS:    s.RSSTrueBytes > 0,
 		})
 	}
 	return out

@@ -174,6 +174,7 @@ func TestToResourceRowsIntensities(t *testing.T) {
 			{
 				Instance: "pod-a", CPUNs: 87e9, GCPauseNs: 1.2e9, RSSBytes: 2048, HeapAllocBytes: 1024, Goroutines: 42,
 				NumGC: 830, TotalAllocBytes: 510e9, Mallocs: 1e6, GCCPUFraction: 0.18,
+				PostGCHeapBytes: 700, RSSTrueBytes: 4096,
 			},
 		}, winSec)
 		require.Len(t, rows, 1)
@@ -188,6 +189,10 @@ func TestToResourceRowsIntensities(t *testing.T) {
 		assert.Equal(t, 2048.0, rows[0].RSSBytes)
 		assert.Equal(t, 1024.0, rows[0].HeapBytes)
 		assert.Equal(t, uint64(42), rows[0].Goroutines)
+		// Post-GC heap baseline maps through; a nonzero true RSS sets HasTrueRSS.
+		assert.Equal(t, 700.0, rows[0].PostGCHeap)
+		assert.Equal(t, 4096.0, rows[0].TrueRSSBytes)
+		assert.True(t, rows[0].HasTrueRSS)
 	})
 
 	t.Run("gc share clamps to 1", func(t *testing.T) {
@@ -212,6 +217,8 @@ func TestToResourceRowsIntensities(t *testing.T) {
 		assert.Zero(t, rows[0].AvgAllocSize)
 		// Byte gauges are independent of the window and still map through.
 		assert.Equal(t, 2048.0, rows[0].RSSBytes)
+		// True RSS was not reported (0), so HasTrueRSS is false and the view renders an em-dash.
+		assert.False(t, rows[0].HasTrueRSS)
 	})
 }
 

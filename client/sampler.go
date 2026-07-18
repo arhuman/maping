@@ -2,10 +2,15 @@ package maping
 
 import (
 	"runtime"
+	"runtime/metrics"
 	"time"
 
 	mapingv1 "github.com/arhuman/maping/proto/maping/v1"
 )
+
+// liveHeapMetric is the runtime/metrics name for the live heap as of the last
+// completed GC mark — the post-GC baseline.
+const liveHeapMetric = "/gc/heap/live:bytes"
 
 // sampler captures per-window process resource gauges (USE: CPU, memory,
 // goroutines, GC pause) that ride along with summary uploads, so a latency rise
@@ -19,7 +24,8 @@ type sampler struct {
 	prevNumGC        uint64
 	prevTotalAlloc   uint64
 	prevMallocs      uint64
-	primed           bool // false until the first sample sets the baselines
+	liveHeap         []metrics.Sample // reusable buffer for the /gc/heap/live:bytes read
+	primed           bool             // false until the first sample sets the baselines
 }
 
 // sample reads a fresh runtime snapshot and builds an InstanceWindow for the
@@ -27,11 +33,21 @@ type sampler struct {
 // previous sample; the first call primes the baselines and reports zero for them
 // (there is no prior window to diff against). Memory and goroutine counts are
 // point-in-time reads. ReadMemStats stops the world briefly but only once per
-// flush window (seconds apart), so its cost is negligible against the flush.
+// flush window (seconds apart), so its cost is negligible against the flush; the
+// extra metrics.Read for the post-GC heap baseline is on the same seconds-apart path.
 func (s *sampler) sample(start, end time.Time) *mapingv1.InstanceWindow {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	cpu := cpuTimeNs()
+
+	if s.liveHeap == nil {
+		s.liveHeap = []metrics.Sample{{Name: liveHeapMetric}}
+	}
+	metrics.Read(s.liveHeap)
+	var postGCHeap uint64
+	if s.liveHeap[0].Value.Kind() == metrics.KindUint64 {
+		postGCHeap = s.liveHeap[0].Value.Uint64()
+	}
 
 	var gcDelta, cpuDelta, numGCDelta, totalAllocDelta, mallocsDelta uint64
 	if s.primed {
@@ -64,5 +80,7 @@ func (s *sampler) sample(start, end time.Time) *mapingv1.InstanceWindow {
 		GcCpuFraction:   ms.GCCPUFraction,
 		HeapInuseBytes:  ms.HeapInuse,
 		Gomaxprocs:      uint32(runtime.GOMAXPROCS(0)),
+		PostGcHeapBytes: postGCHeap,
+		RssTrueBytes:    rssBytes(),
 	}
 }

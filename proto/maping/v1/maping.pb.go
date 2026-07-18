@@ -677,7 +677,16 @@ type InstanceWindow struct {
 	HeapInuseBytes uint64 `protobuf:"varint,12,opt,name=heap_inuse_bytes,json=heapInuseBytes,proto3" json:"heap_inuse_bytes,omitempty"`
 	// gomaxprocs is the process's GOMAXPROCS at sample time, used to normalize CPU
 	// intensity to a share of available cores. Point-in-time gauge.
-	Gomaxprocs    uint32 `protobuf:"varint,13,opt,name=gomaxprocs,proto3" json:"gomaxprocs,omitempty"`
+	Gomaxprocs uint32 `protobuf:"varint,13,opt,name=gomaxprocs,proto3" json:"gomaxprocs,omitempty"`
+	// post_gc_heap_bytes is the live heap as of the last completed GC mark
+	// (/gc/heap/live:bytes), the post-GC baseline. Unlike heap_alloc_bytes (an
+	// arbitrary sample point), a monotonically rising value distinguishes a leak
+	// from an allocation burst. Point-in-time gauge.
+	PostGcHeapBytes uint64 `protobuf:"varint,14,opt,name=post_gc_heap_bytes,json=postGcHeapBytes,proto3" json:"post_gc_heap_bytes,omitempty"`
+	// rss_true_bytes is true resident set size from the OS (Linux /proc/self/statm),
+	// unlike rss_bytes which is runtime Sys (reserved address space). Best-effort:
+	// 0 on platforms where it is not wired up. Point-in-time gauge.
+	RssTrueBytes  uint64 `protobuf:"varint,15,opt,name=rss_true_bytes,json=rssTrueBytes,proto3" json:"rss_true_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -799,6 +808,20 @@ func (x *InstanceWindow) GetHeapInuseBytes() uint64 {
 func (x *InstanceWindow) GetGomaxprocs() uint32 {
 	if x != nil {
 		return x.Gomaxprocs
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetPostGcHeapBytes() uint64 {
+	if x != nil {
+		return x.PostGcHeapBytes
+	}
+	return 0
+}
+
+func (x *InstanceWindow) GetRssTrueBytes() uint64 {
+	if x != nil {
+		return x.RssTrueBytes
 	}
 	return 0
 }
@@ -1055,7 +1078,7 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\rUploadRequest\x12/\n" +
 	"\benvelope\x18\x01 \x01(\v2\x13.maping.v1.EnvelopeR\benvelope\x120\n" +
 	"\tsummaries\x18\x02 \x03(\v2\x12.maping.v1.SummaryR\tsummaries\x12D\n" +
-	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\xc9\x03\n" +
+	"\x10instance_windows\x18\x03 \x03(\v2\x19.maping.v1.InstanceWindowR\x0finstanceWindows\"\x9c\x04\n" +
 	"\x0eInstanceWindow\x12&\n" +
 	"\x0fwindow_start_ms\x18\x01 \x01(\x03R\rwindowStartMs\x12\"\n" +
 	"\rwindow_end_ms\x18\x02 \x01(\x03R\vwindowEndMs\x12\x15\n" +
@@ -1074,7 +1097,9 @@ const file_maping_v1_maping_proto_rawDesc = "" +
 	"\x10heap_inuse_bytes\x18\f \x01(\x04R\x0eheapInuseBytes\x12\x1e\n" +
 	"\n" +
 	"gomaxprocs\x18\r \x01(\rR\n" +
-	"gomaxprocs\"s\n" +
+	"gomaxprocs\x12+\n" +
+	"\x12post_gc_heap_bytes\x18\x0e \x01(\x04R\x0fpostGcHeapBytes\x12$\n" +
+	"\x0erss_true_bytes\x18\x0f \x01(\x04R\frssTrueBytes\"s\n" +
 	"\x0eUploadResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12-\n" +

@@ -768,12 +768,14 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 100, RSSBytes: 10, HeapAllocBytes: 100, GCPauseNs: 1, Goroutines: 5,
 		NumGC: 1, TotalAllocBytes: 1000, Mallocs: 10, GCCPUFraction: 0.1, HeapInuseBytes: 80, GOMAXPROCS: 4,
+		PostGCHeapBytes: 70, RSSTrueBytes: 4096,
 	}))
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
 		Tenant: tid, Service: "svc", Instance: "pod-a",
 		WindowStart: now.Add(10 * time.Second), WindowEnd: now.Add(20 * time.Second),
 		CPUNs: 200, RSSBytes: 20, HeapAllocBytes: 50, GCPauseNs: 2, Goroutines: 9,
 		NumGC: 2, TotalAllocBytes: 2000, Mallocs: 20, GCCPUFraction: 0.3, HeapInuseBytes: 60, GOMAXPROCS: 8,
+		PostGCHeapBytes: 90, RSSTrueBytes: 2048,
 	}))
 	// pod-b reports one window.
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
@@ -781,6 +783,7 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 50, RSSBytes: 7, HeapAllocBytes: 30, GCPauseNs: 4, Goroutines: 3,
 		NumGC: 5, TotalAllocBytes: 500, Mallocs: 25, GCCPUFraction: 0.4, HeapInuseBytes: 25, GOMAXPROCS: 2,
+		PostGCHeapBytes: 20, RSSTrueBytes: 1024,
 	}))
 	// Another tenant's gauges must stay isolated.
 	require.NoError(t, w.EnqueueInstanceWindow(InstanceWindowRow{
@@ -788,6 +791,7 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 		WindowStart: now, WindowEnd: now.Add(10 * time.Second),
 		CPUNs: 9999, RSSBytes: 9999, HeapAllocBytes: 9999, GCPauseNs: 9999, Goroutines: 9999,
 		NumGC: 9999, TotalAllocBytes: 9999, Mallocs: 9999, GCCPUFraction: 0.99, HeapInuseBytes: 9999, GOMAXPROCS: 99,
+		PostGCHeapBytes: 9999, RSSTrueBytes: 9999,
 	}))
 
 	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -813,6 +817,8 @@ func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 	require.InDelta(t, 0.2, res[0].GCCPUFraction, 1e-9)    // avg(0.1, 0.3)
 	require.Equal(t, uint64(80), res[0].HeapInuseBytes)    // max(80, 60)
 	require.Equal(t, uint32(8), res[0].GOMAXPROCS)         // max(4, 8)
+	require.Equal(t, uint64(90), res[0].PostGCHeapBytes)   // max(70, 90)
+	require.Equal(t, uint64(4096), res[0].RSSTrueBytes)    // max(4096, 2048)
 
 	require.Equal(t, "pod-b", res[1].Instance)
 	require.Equal(t, uint64(50), res[1].CPUNs)

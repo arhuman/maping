@@ -184,6 +184,15 @@ message InstanceWindow {
   // gomaxprocs is the process's GOMAXPROCS at sample time, used to normalize CPU
   // intensity to a share of available cores. Point-in-time gauge.
   uint32 gomaxprocs = 13;
+  // post_gc_heap_bytes is the live heap as of the last completed GC mark
+  // (/gc/heap/live:bytes), the post-GC baseline. Unlike heap_alloc_bytes (an
+  // arbitrary sample point), a monotonically rising value distinguishes a leak
+  // from an allocation burst. Point-in-time gauge.
+  uint64 post_gc_heap_bytes = 14;
+  // rss_true_bytes is true resident set size from the OS (Linux /proc/self/statm),
+  // unlike rss_bytes which is runtime Sys (reserved address space). Best-effort:
+  // 0 on platforms where it is not wired up. Point-in-time gauge.
+  uint64 rss_true_bytes = 15;
 }
 
 message UploadResponse {

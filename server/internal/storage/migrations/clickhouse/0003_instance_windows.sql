@@ -15,6 +15,10 @@
 -- num_gc..gomaxprocs are additive MemStats fields already read per sample by the
 -- client (near-zero cost). They are declared here so a fresh DB gets them directly;
 -- 0004 ADDs the same columns to an existing dev DB (non-destructive, no reset).
+--
+-- post_gc_heap_bytes (live heap at the last GC mark, the post-GC baseline) and
+-- rss_true_bytes (true OS resident set size) are point-in-time gauges added the
+-- same way: declared here for fresh DBs; 0005 ADDs them to an existing dev DB.
 
 CREATE TABLE IF NOT EXISTS instance_windows
 (
@@ -33,7 +37,9 @@ CREATE TABLE IF NOT EXISTS instance_windows
     mallocs           UInt64,
     gc_cpu_fraction   Float64,
     heap_inuse_bytes  UInt64,
-    gomaxprocs        UInt32
+    gomaxprocs        UInt32,
+    post_gc_heap_bytes UInt64,
+    rss_true_bytes     UInt64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)
