@@ -53,12 +53,9 @@ Substantial or architecture-affecting changes should be accompanied by an Archit
 
 ## Licensing of Contributions
 
-This repository is **not single-licensed** — each module carries its own license (see the License section of the [README.md](README.md)). By submitting a contribution, you agree to license it under the license of the module you are modifying. In particular:
+This repository is licensed under the **MIT License** (see the License section of the [README.md](README.md)). By submitting a contribution, you agree to license it under the MIT License.
 
-- Contributions to `proto`, `client`, `client/gin`, and `example` are licensed under the **MIT License**.
-- Contributions to `server` are licensed under the **Business Source License 1.1**.
-
-If you are not comfortable contributing under a module's license, please open an issue to discuss before submitting a pull request.
+If you are not comfortable contributing under the MIT License, please open an issue to discuss before submitting a pull request.
 
 ## Development Environment
 

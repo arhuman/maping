@@ -63,16 +63,16 @@ jobs:
           done
           exit $fail
 
-  # License-map gate: keeps the open-core license map honest. Every Go module
-  # (each go.mod directory) must ship its own LICENSE file and be listed in the
-  # README license table. Prevents a module shipping unlicensed or undocumented
-  # (the drift that left example/ without a LICENSE despite the README map).
+  # License gate: the repository is MIT throughout (ADR-0022). Every Go module
+  # (each go.mod directory) must still ship its own LICENSE file so pkg.go.dev and
+  # go tooling resolve a license per module. Prevents the drift that once left
+  # example/ without a LICENSE.
   license:
-    name: license map
+    name: license
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Every module has a LICENSE and a README license-table row
+      - name: Every module ships a LICENSE file
         run: |
           set -euo pipefail
           fail=0
@@ -81,17 +81,14 @@ jobs:
               echo "::error file=$m::module '$m' has no LICENSE file"
               fail=1
             fi
-            if ! grep -Fq "| \`$m\` |" README.md; then
-              echo "::error::module '$m' is not listed in the README license table"
-              fail=1
-            fi
           done
           exit $fail
 
   # Public-tree gate: the open-core tree must not name the composing build's
   # hosted-service surfaces (payment/plan-commerce vocabulary scrubbed in the
   # public split). This grep catches a re-introduction in CI instead of leaving
-  # it for review — the code-absence invariant (ADR-0004). It scans tracked
+  # it for review — the code-absence invariant (ADR-0022; introduced in 0004,
+  # which survives the relicensing to MIT). It scans tracked
   # source/docs, skipping generated protobuf/connect stubs and the workflow file
   # itself (which necessarily spells the forbidden terms in the pattern below).
   public-tree:

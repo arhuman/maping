@@ -1,8 +1,12 @@
 ---
-status: accepted
+status: superseded by 0022-relicense-server-mit
 ---
 
 # Open-core: MIT client, BSL server
+
+> **Superseded by [ADR-0022](0022-relicense-server-mit.md).** The server was relicensed
+> from BSL 1.1 to MIT; the whole repository is now MIT. The reasoning below is kept for
+> the historical record. The *code-absence invariant* it introduced still holds — see 0022.
 
 The mAPI-ng **client library is open source under MIT**. The **server**
 (collector, ClickHouse schema, rollups, dashboard, control plane) is

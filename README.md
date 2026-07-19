@@ -38,7 +38,7 @@ For the full product framing, design decisions, and terminology, see [`docs/cont
 mAPI-ng/
   client/          Go module: github.com/arhuman/maping/client      (MIT)
     gin/           Go module: github.com/arhuman/maping/client/gin  (MIT, Gin adapter)
-  server/          Go module: github.com/arhuman/maping/server      (BSL 1.1)
+  server/          Go module: github.com/arhuman/maping/server      (MIT)
     cmd/maping-server/
     internal/
   proto/           Go module: github.com/arhuman/maping/proto       (MIT, shared protobuf)
@@ -46,17 +46,16 @@ mAPI-ng/
   Dockerfile       maping-server image (Go workspace build)
   docker-compose*.yml  neutral base + local/prod overlays
   env.sample       template for .env (make local / make up read it)
-  LICENSE          per-module license map (this repo is not single-licensed)
+  LICENSE          MIT license (applies to the whole repository)
   docs/context.md  Product framing, design decisions, terminology
   docs/adr/        Architecture Decision Records
   go.work          Workspace tying proto, client, client/gin, server, and example together
 ```
 
-The repository is an **open-core, multi-module** project: `proto`, `client`, and the
-`client/gin` adapter are **MIT** (auditable, safe to import into production hot paths);
-`server` is **BSL 1.1** (source-available, self-hostable for non-competing use). Each module
-carries its own `LICENSE`; the root `LICENSE` is only the map. Keeping the Gin adapter in a
-separate module means importing the core client never pulls Gin into your binary.
+The repository is an **open-source, multi-module** project: every module — `proto`, `client`,
+the framework adapters, and `server` — is **MIT** (auditable, safe to import into production hot
+paths, free to self-host and modify). Keeping the Gin adapter in a separate module means importing
+the core client never pulls Gin into your binary.
 
 The modules are wired together for local development by `go.work`, so build and test from the
 repo root (or anywhere inside the tree) — the workspace resolves cross-module imports from
@@ -123,7 +122,7 @@ Design decisions are recorded in [`docs/adr/`](docs/adr/):
 | [0001](docs/adr/0001-ddsketch-for-latency.md) | DDSketch for latency aggregation |
 | [0002](docs/adr/0002-connect-client-grpc-server.md) | Connect client / gRPC server |
 | [0003](docs/adr/0003-clickhouse-storage.md) | ClickHouse for storage |
-| [0004](docs/adr/0004-open-core-licensing.md) | Open-core: MIT client, BSL server |
+| [0004](docs/adr/0004-open-core-licensing.md) | Open-core: MIT client, BSL server (superseded by 0022) |
 | [0005](docs/adr/0005-ingest-direct-then-queue.md) | Direct batched ClickHouse writes for v1, durable queue later |
 | [0006](docs/adr/0006-dashboard-server-rendered-htmx-uplot.md) | Dashboard: server-rendered Go + htmx + uPlot (superseded by 0008) |
 | [0007](docs/adr/0007-dashboard-auth-oidc-session-cookies.md) | Dashboard auth: OIDC, stateless session cookies |
@@ -136,28 +135,19 @@ Design decisions are recorded in [`docs/adr/`](docs/adr/):
 | [0014](docs/adr/0014-exemplars-and-max-latency.md) | Exemplars: bounded request breadcrumbs from an aggregate to a trace |
 | [0015](docs/adr/0015-use-gauges-instance-windows.md) | USE gauges: per-instance saturation as a separate stream |
 | [0016](docs/adr/0016-composition-seams.md) | Composition seams: out-of-tree features via app.Run options |
+| [0022](docs/adr/0022-relicense-server-mit.md) | Relicense the server to MIT (supersedes 0004) |
 
 
 ---
 
 ## License
 
-This repository is not single-licensed. Each module has its own license.
+mAPI-ng is released under the **MIT License** — the whole repository, every module
+(`proto`, `client` and its adapters, `server`, `example`).
 
-| Module | License |
-|---|---|
-| `proto` | MIT |
-| `client` | MIT |
-| `client/gin` | MIT |
-| `client/beego` | MIT |
-| `client/chi` | MIT |
-| `client/echo` | MIT |
-| `client/nethttp` | MIT |
-| `server` | Business Source License 1.1 |
-| `example` | MIT |
-
-See the `LICENSE` file in each module directory for the full text. The root `LICENSE` file
-is only a map of the licenses used.
+Each module directory carries an MIT `LICENSE` file for tooling; the root `LICENSE` is the
+same MIT license and governs the repository. See [ADR-0022](docs/adr/0022-relicense-server-mit.md)
+for why the server moved from BSL 1.1 to MIT.
 
 ---
 

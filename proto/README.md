@@ -35,4 +35,4 @@ fails the build. Add fields, never renumber or remove them.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). The root `LICENSE` is only the per-module map.
+MIT — see [`LICENSE`](LICENSE). The whole repository is MIT-licensed (ADR-0022).

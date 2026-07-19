@@ -2,8 +2,7 @@
 
 `maping-server` — the mAPI-ng collector, dashboard, and control plane.
 
-**License: BSL 1.1** (Business Source License). Source-available for non-competing use.
-Self-hosting is permitted; reselling as a competing hosted service is not. See `LICENSE`.
+**License: MIT.** Free to use, self-host, and modify. See `LICENSE`.
 
 ---
 
