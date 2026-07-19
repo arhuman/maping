@@ -149,6 +149,10 @@ This repository is not single-licensed. Each module has its own license.
 | `proto` | MIT |
 | `client` | MIT |
 | `client/gin` | MIT |
+| `client/beego` | MIT |
+| `client/chi` | MIT |
+| `client/echo` | MIT |
+| `client/nethttp` | MIT |
 | `server` | Business Source License 1.1 |
 | `example` | MIT |
 

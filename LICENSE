@@ -8,6 +8,10 @@ rationale.
   github.com/arhuman/maping/proto         proto/      MIT
   github.com/arhuman/maping/client        client/     MIT
   github.com/arhuman/maping/client/gin    client/gin/ MIT
+  github.com/arhuman/maping/client/beego  client/beego/ MIT
+  github.com/arhuman/maping/client/chi    client/chi/ MIT
+  github.com/arhuman/maping/client/echo   client/echo/ MIT
+  github.com/arhuman/maping/client/nethttp client/nethttp/ MIT
   github.com/arhuman/maping/server        server/     Business Source License 1.1
   github.com/arhuman/maping/example       example/    MIT
 
