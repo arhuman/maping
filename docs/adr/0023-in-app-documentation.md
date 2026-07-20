@@ -45,18 +45,21 @@ core repo and must exist in every build, not only behind the commercial binary.
     (rendered from its own embedded Markdown via the exported
     `docs.MarkdownToHTML`) in the exact same shell and merged TOC. An extension
     page is therefore indistinguishable from a core one.
-  - `WithDocHeaderLinks(...docs.Link)` adds links to the doc-page top bar (e.g.
-    Pricing, Sign in) so a visitor who reached the docs from the marketing site can
-    navigate back. The community build injects none — the top bar then shows only
-    the home brand (`/`) — so no link ever points at a route the build does not
-    serve.
+  - `WithDocHeader(template.HTML)` injects a full site header rendered above every
+    doc page, so the documentation wears the same chrome as the rest of the site
+    (same logo, nav, and calls to action) rather than a detached bar — the fix for
+    "the docs read as a different site." The composing build passes its own
+    marketing header (with absolute links); the community build sets none and the
+    shell falls back to a minimal home brand (`/`), so no link ever points at a
+    route the build does not serve.
   The `server/docs` package is intentionally **not** `internal/`, so a composing
-  module can import `Section` / `Link` / `MarkdownToHTML`.
-- **Discoverability.** The doc pages carry a sticky top bar (a home brand plus the
-  injected site links) and a left TOC rail. The authenticated dashboard also links
-  to `/doc` from a "Documentation" item in its sidebar (`buildNav`), so a signed-in
-  user reaches the docs from every dashboard page — in the community build and the
-  enterprise binary alike, since both render the same core dashboard chrome.
+  module can import `Section` / `MarkdownToHTML`.
+- **Discoverability.** The doc pages carry a full site header (injected, or a
+  minimal home brand in the community build) and a left TOC rail. The authenticated
+  dashboard also links to `/doc` from a "Documentation" item in its sidebar
+  (`buildNav`), so a signed-in user reaches the docs from every dashboard page — in
+  the community build and the enterprise binary alike, since both render the same
+  core dashboard chrome.
 - **Routing.** `/doc` and `/doc/{topic}` mount on the outer (unauthenticated) mux
   like `/login`. Extension pages mount on more specific patterns (`/doc/billing`),
   which take Go 1.22 ServeMux precedence over the `{topic}` wildcard; an unknown

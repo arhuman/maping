@@ -39,10 +39,13 @@ func MarkdownToHTML(src []byte) (template.HTML, error) {
 // page's title and rendered body. Groups are pre-sorted so the template is pure
 // iteration.
 type shellData struct {
-	Title  string
-	Body   template.HTML
+	Title string
+	Body  template.HTML
+	// Header is a full site header a composing build injects (via app.WithDocHeader)
+	// so the doc pages wear the same chrome as the rest of the site. Empty in the
+	// community build, where the shell falls back to a minimal home brand.
+	Header template.HTML
 	Groups []navGroup
-	Header []Link
 }
 
 // navGroup is one heading in the left rail (e.g. "Product", "Enterprise") and its
@@ -93,8 +96,8 @@ a:hover{text-decoration:underline;}
 .topbar nav{margin-left:auto;display:flex;align-items:center;gap:22px;font:600 13px var(--ui);color:var(--txt-2);}
 .topbar nav a{color:var(--txt-2);}
 .topbar nav a:hover{color:var(--txt);text-decoration:none;}
-.wrap{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:calc(100vh - var(--topbar-h));}
-.rail{border-right:1px solid var(--line);background:linear-gradient(180deg,#0C0F14,#0A0C0F);padding:26px 18px;position:sticky;top:var(--topbar-h);align-self:start;height:calc(100vh - var(--topbar-h));overflow-y:auto;}
+.wrap{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh;}
+.rail{border-right:1px solid var(--line);background:linear-gradient(180deg,#0C0F14,#0A0C0F);padding:26px 18px;}
 .grp{font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;text-transform:uppercase;margin:22px 6px 8px;}
 .lnk{display:block;padding:7px 10px;border-radius:8px;font:600 13px var(--ui);color:var(--txt-2);}
 .lnk:hover{background:var(--panel-2);color:var(--txt);text-decoration:none;}
@@ -129,14 +132,13 @@ a:hover{text-decoration:underline;}
 </style>
 </head>
 <body>
+{{if .Header}}{{.Header}}{{else}}
 <header class="topbar">
   <a class="b" href="/">m<em>API</em>ng</a>
   <span class="sep">/</span>
   <a class="dtag" href="/doc">docs</a>
-  <nav>
-    {{range .Header}}<a href="{{.Href}}">{{.Label}}</a>{{end}}
-  </nav>
 </header>
+{{end}}
 <div class="wrap">
   <aside class="rail">
     {{range .Groups}}

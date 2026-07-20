@@ -13,7 +13,7 @@ import (
 )
 
 func testHandler(extra ...Section) (*Handler, *http.ServeMux) {
-	h := NewHandler(extra, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := NewHandler(extra, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return h, mux
@@ -73,23 +73,24 @@ func TestRenderWrapsArbitraryBodyWithSharedNav(t *testing.T) {
 	assert.Contains(t, out, `class="lnk on" href="/doc/billing"`)
 }
 
-func TestHeaderLinksRenderInTopBar(t *testing.T) {
-	h := NewHandler(nil, []Link{{Label: "Pricing", Href: "/pricing"}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+func TestInjectedHeaderReplacesBuiltInBar(t *testing.T) {
+	h := NewHandler(nil, `<header id="site-header"><a href="/pricing">Pricing</a></header>`, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.Register(mux)
 	body := get(t, mux, "/doc").Body.String()
-	assert.Contains(t, body, `href="/pricing"`, "injected header link must render in the top bar")
-	assert.Contains(t, body, "Pricing")
-	// The home brand is always present so there is a way back even with no links.
-	assert.Contains(t, body, `class="b" href="/"`)
+	assert.Contains(t, body, `id="site-header"`, "the injected site header must render")
+	assert.Contains(t, body, `href="/pricing"`)
+	assert.NotContains(t, body, `class="topbar"`, "the minimal built-in bar is replaced when a header is injected")
 }
 
-func TestNoHeaderLinksLeavesNoDeadLinks(t *testing.T) {
-	// Community build: no injected links, so the top bar carries only the home brand.
+func TestCommunityBuildFallsBackToHomeBrand(t *testing.T) {
+	// No injected header: the shell shows only the minimal home brand, never a dead
+	// link to a route the build does not serve.
 	_, mux := testHandler()
 	body := get(t, mux, "/doc").Body.String()
-	assert.NotContains(t, body, `href="/pricing"`)
+	assert.Contains(t, body, `class="topbar"`)
 	assert.Contains(t, body, `class="b" href="/"`)
+	assert.NotContains(t, body, `/pricing`)
 }
 
 func TestMarkdownRendersTablesAndCode(t *testing.T) {

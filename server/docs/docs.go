@@ -48,14 +48,6 @@ var coreSections = []Section{
 	{Group: "Product", Title: "Licensing", Href: "/doc/licensing", Order: 9},
 }
 
-// Link is one top-bar site link (e.g. "Pricing" -> /pricing). A composing build
-// injects these via app.WithDocHeaderLinks so a visitor who reached the docs from
-// the marketing site can navigate back; the community build injects none, so the
-// top bar shows only the home brand and no dead links to routes it does not serve.
-type Link struct {
-	Label, Href string
-}
-
 // titleOf resolves a slug back to its rail title so a topic page's <title> and the
 // dashboard tab read the human name, not the slug. Falls back to the slug.
 func titleOf(sections []Section, href string) string {
@@ -68,19 +60,20 @@ func titleOf(sections []Section, href string) string {
 }
 
 // Handler serves the doc pages. nav is the merged, ordered table of contents
-// (core + injected sections) shared by every page; header is the top-bar site
-// links a composing build injected.
+// (core + injected sections) shared by every page; header is the full site header
+// a composing build injected (empty in the community build).
 type Handler struct {
 	nav    []Section
-	header []Link
+	header template.HTML
 	log    *slog.Logger
 }
 
 // NewHandler builds the doc handler, merging the injected extension sections after
 // the core ones. The merged set drives the left rail on every page, so an
-// extension page and a core page show the same table of contents; header drives
-// the top-bar site links (empty in the community build).
-func NewHandler(extra []Section, header []Link, log *slog.Logger) *Handler {
+// extension page and a core page show the same table of contents; header is the
+// full site header rendered above every doc page (empty in the community build,
+// where the shell falls back to a minimal home brand).
+func NewHandler(extra []Section, header template.HTML, log *slog.Logger) *Handler {
 	nav := make([]Section, 0, len(coreSections)+len(extra))
 	nav = append(nav, coreSections...)
 	nav = append(nav, extra...)

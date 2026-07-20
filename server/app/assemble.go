@@ -109,7 +109,7 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	// the merged table of contents (core product pages + any extension-injected
 	// sections), and its Render is handed to extensions as RenderDoc so their own
 	// /doc/* pages share the exact chrome and TOC.
-	docsHandler := docs.NewHandler(o.docSections, o.docHeaderLinks, log)
+	docsHandler := docs.NewHandler(o.docSections, o.docHeader, log)
 	docsHandler.Register(mux)
 
 	// Extension routes mount after the core surfaces so their patterns compose by

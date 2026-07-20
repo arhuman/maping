@@ -103,7 +103,7 @@ type options struct {
 	publicHome       http.HandlerFunc
 	accountHref      string
 	docSections      []docs.Section
-	docHeaderLinks   []docs.Link
+	docHeader        template.HTML
 }
 
 // Option configures Run.
@@ -175,13 +175,14 @@ func WithDocSections(sections ...docs.Section) Option {
 	return func(o *options) { o.docSections = append(o.docSections, sections...) }
 }
 
-// WithDocHeaderLinks adds site links to the /doc top bar (e.g. Pricing, Sign in),
-// so a visitor who reached the documentation from the marketing site can navigate
-// back to it. A composing build injects the links to its own public routes; the
-// community build injects none (the top bar then shows only the home brand), so no
-// link ever points at a route the build does not serve.
-func WithDocHeaderLinks(links ...docs.Link) Option {
-	return func(o *options) { o.docHeaderLinks = append(o.docHeaderLinks, links...) }
+// WithDocHeader injects a full site header rendered above every /doc page, so the
+// documentation wears the same chrome as the rest of the site (the same logo, nav,
+// and calls to action) instead of a detached bar. html is trusted markup the
+// composing build produced from its own templates — typically its marketing header
+// with absolute links. The community build sets none, and the shell falls back to
+// a minimal home brand. Setting it more than once keeps the last header.
+func WithDocHeader(html template.HTML) Option {
+	return func(o *options) { o.docHeader = html }
 }
 
 // WithAccountLink turns the dashboard sidebar's user-identity block into a link to
