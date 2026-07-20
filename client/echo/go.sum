@@ -1,9 +1,9 @@
 connectrpc.com/connect v1.20.0 h1:6TNDAB+WeNd2uolWNlYczB5E0KNNaVMNUEx8JEUsPmQ=
 connectrpc.com/connect v1.20.0/go.mod h1:A2ygJrukXwWy32vkCAAHNVguZrqZ+jeZ9rGRnGR4dN4=
-github.com/arhuman/maping/client v0.5.0 h1:cEzGl5FeoJoZB8y8RtC0S9+Wp67DSQGqyYcC/sNryMo=
-github.com/arhuman/maping/client v0.5.0/go.mod h1:yYv+c5oSugyKZKglNKhr/mdVqb8LDGvfpSlER6vtFDU=
-github.com/arhuman/maping/proto v0.5.0 h1:LhPK14G+zGf9uTlSLq2picIYNhgPH0VFHC27gnG13z8=
-github.com/arhuman/maping/proto v0.5.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
+github.com/arhuman/maping/client v0.6.0 h1:5hegAIU6Wc+Tbgviemcr3xZERqdYj3SI2dIk7fZshA0=
+github.com/arhuman/maping/client v0.6.0/go.mod h1:6Eu9DqoNKMz+UbwMfFciqTPpF83XL7vAZ9SM2aubG44=
+github.com/arhuman/maping/proto v0.6.0 h1:gLApe2otAQwFbrs+OXf9MVOLyuYAaIDCDXoSdWPcbtw=
+github.com/arhuman/maping/proto v0.6.0/go.mod h1:wnDsQuZhGqY3GunwJSWjd3bIN1CVrSMKQINVUvFA58Y=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
