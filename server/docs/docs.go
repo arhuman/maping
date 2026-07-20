@@ -48,6 +48,14 @@ var coreSections = []Section{
 	{Group: "Product", Title: "Licensing", Href: "/doc/licensing", Order: 9},
 }
 
+// Link is one top-bar site link (e.g. "Pricing" -> /pricing). A composing build
+// injects these via app.WithDocHeaderLinks so a visitor who reached the docs from
+// the marketing site can navigate back; the community build injects none, so the
+// top bar shows only the home brand and no dead links to routes it does not serve.
+type Link struct {
+	Label, Href string
+}
+
 // titleOf resolves a slug back to its rail title so a topic page's <title> and the
 // dashboard tab read the human name, not the slug. Falls back to the slug.
 func titleOf(sections []Section, href string) string {
@@ -60,20 +68,23 @@ func titleOf(sections []Section, href string) string {
 }
 
 // Handler serves the doc pages. nav is the merged, ordered table of contents
-// (core + injected sections) shared by every page.
+// (core + injected sections) shared by every page; header is the top-bar site
+// links a composing build injected.
 type Handler struct {
-	nav []Section
-	log *slog.Logger
+	nav    []Section
+	header []Link
+	log    *slog.Logger
 }
 
 // NewHandler builds the doc handler, merging the injected extension sections after
 // the core ones. The merged set drives the left rail on every page, so an
-// extension page and a core page show the same table of contents.
-func NewHandler(extra []Section, log *slog.Logger) *Handler {
+// extension page and a core page show the same table of contents; header drives
+// the top-bar site links (empty in the community build).
+func NewHandler(extra []Section, header []Link, log *slog.Logger) *Handler {
 	nav := make([]Section, 0, len(coreSections)+len(extra))
 	nav = append(nav, coreSections...)
 	nav = append(nav, extra...)
-	return &Handler{nav: nav, log: log}
+	return &Handler{nav: nav, header: header, log: log}
 }
 
 // Register mounts the doc routes on the public mux. /doc/{topic} is the core
@@ -124,7 +135,7 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, slug, active
 func (h *Handler) Render(w http.ResponseWriter, r *http.Request, title string, body template.HTML) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
-	data := shellData{Title: title, Body: body, Groups: h.groups(r.URL.Path)}
+	data := shellData{Title: title, Body: body, Groups: h.groups(r.URL.Path), Header: h.header}
 	if err := shellTmpl.Execute(w, data); err != nil {
 		h.log.Error("docs: execute shell", slog.Any("err", err))
 	}

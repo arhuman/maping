@@ -103,6 +103,7 @@ type options struct {
 	publicHome       http.HandlerFunc
 	accountHref      string
 	docSections      []docs.Section
+	docHeaderLinks   []docs.Link
 }
 
 // Option configures Run.
@@ -172,6 +173,15 @@ func WithPublicHome(home http.HandlerFunc) Option {
 // default: none, so the community build shows only the core product sections.
 func WithDocSections(sections ...docs.Section) Option {
 	return func(o *options) { o.docSections = append(o.docSections, sections...) }
+}
+
+// WithDocHeaderLinks adds site links to the /doc top bar (e.g. Pricing, Sign in),
+// so a visitor who reached the documentation from the marketing site can navigate
+// back to it. A composing build injects the links to its own public routes; the
+// community build injects none (the top bar then shows only the home brand), so no
+// link ever points at a route the build does not serve.
+func WithDocHeaderLinks(links ...docs.Link) Option {
+	return func(o *options) { o.docHeaderLinks = append(o.docHeaderLinks, links...) }
 }
 
 // WithAccountLink turns the dashboard sidebar's user-identity block into a link to

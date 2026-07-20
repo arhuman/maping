@@ -13,7 +13,7 @@ import (
 )
 
 func testHandler(extra ...Section) (*Handler, *http.ServeMux) {
-	h := NewHandler(extra, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := NewHandler(extra, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return h, mux
@@ -71,6 +71,25 @@ func TestRenderWrapsArbitraryBodyWithSharedNav(t *testing.T) {
 	assert.Contains(t, out, "Quickstart", "shared core TOC must still render on an extension page")
 	// The active link for the current path is lit.
 	assert.Contains(t, out, `class="lnk on" href="/doc/billing"`)
+}
+
+func TestHeaderLinksRenderInTopBar(t *testing.T) {
+	h := NewHandler(nil, []Link{{Label: "Pricing", Href: "/pricing"}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mux := http.NewServeMux()
+	h.Register(mux)
+	body := get(t, mux, "/doc").Body.String()
+	assert.Contains(t, body, `href="/pricing"`, "injected header link must render in the top bar")
+	assert.Contains(t, body, "Pricing")
+	// The home brand is always present so there is a way back even with no links.
+	assert.Contains(t, body, `class="b" href="/"`)
+}
+
+func TestNoHeaderLinksLeavesNoDeadLinks(t *testing.T) {
+	// Community build: no injected links, so the top bar carries only the home brand.
+	_, mux := testHandler()
+	body := get(t, mux, "/doc").Body.String()
+	assert.NotContains(t, body, `href="/pricing"`)
+	assert.Contains(t, body, `class="b" href="/"`)
 }
 
 func TestMarkdownRendersTablesAndCode(t *testing.T) {

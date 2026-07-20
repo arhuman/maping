@@ -175,6 +175,10 @@ func buildNav(active, winKey string) []navItem {
 		{Label: "Services", Icon: "▦", Href: withWin("/", winKey), Badge: ""},
 		{Label: "Performance", Icon: "◈", Href: withWin("/performance", winKey), Badge: ""},
 		{Label: "Setup", Icon: "✦", Href: withWin("/setup", winKey), Badge: ""},
+		// Documentation opens the public /doc surface; it renders in its own shell
+		// (not this dashboard chrome), so it never carries an active state here and the
+		// window param is not threaded onto it.
+		{Label: "Documentation", Icon: "❖", Href: "/doc", Badge: ""},
 	}
 	navKey := map[string]string{
 		"Services": "overview", "Performance": "performance", "Setup": "setup",

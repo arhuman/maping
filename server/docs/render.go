@@ -34,13 +34,15 @@ func MarkdownToHTML(src []byte) (template.HTML, error) {
 	return template.HTML(buf.String()), nil //nolint:gosec // build-time trusted content, safe renderer
 }
 
-// shellData is the doc-page view model: the merged, grouped table of contents (the
-// left rail, identical on every page) plus the current page's title and rendered
-// body. Groups are pre-sorted so the template is pure iteration.
+// shellData is the doc-page view model: the top-bar site links, the merged, grouped
+// table of contents (the left rail, identical on every page), and the current
+// page's title and rendered body. Groups are pre-sorted so the template is pure
+// iteration.
 type shellData struct {
 	Title  string
 	Body   template.HTML
 	Groups []navGroup
+	Header []Link
 }
 
 // navGroup is one heading in the left rail (e.g. "Product", "Enterprise") and its
@@ -75,18 +77,24 @@ var shellTmpl = template.Must(template.New("doc").Parse(`<!doctype html>
   --line:rgba(255,255,255,.08); --line-soft:rgba(255,255,255,.045);
   --txt:#E8EDF3; --txt-2:#9AA4B2; --txt-3:#69727F;
   --accent:#B4F14A; --blue:#5EA0FF;
+  --topbar-h:57px;
   --ui:'Hanken Grotesk',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box;}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--ui);-webkit-font-smoothing:antialiased;}
 a{color:var(--accent);text-decoration:none;}
 a:hover{text-decoration:underline;}
-.wrap{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh;}
-.rail{border-right:1px solid var(--line);background:linear-gradient(180deg,#0C0F14,#0A0C0F);padding:26px 18px;position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;}
-.brand{display:flex;align-items:baseline;gap:8px;font:800 17px var(--ui);color:var(--txt);margin-bottom:4px;}
-.brand span{font:600 11px var(--mono);color:var(--accent);letter-spacing:.5px;}
-.brand:hover{text-decoration:none;}
-.tagline{font:500 11px var(--mono);color:var(--txt-3);margin:0 0 24px;letter-spacing:.3px;}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;height:var(--topbar-h);padding:0 26px;border-bottom:1px solid var(--line);background:rgba(10,12,15,.82);backdrop-filter:blur(10px);}
+.topbar .b{display:flex;align-items:baseline;gap:7px;font:800 16px var(--ui);color:var(--txt);letter-spacing:-.3px;}
+.topbar .b em{font-style:normal;color:var(--accent);}
+.topbar .b:hover{text-decoration:none;}
+.topbar .sep{color:var(--txt-3);font-weight:400;}
+.topbar .dtag{font:600 12px var(--mono);color:var(--txt-2);letter-spacing:.5px;}
+.topbar nav{margin-left:auto;display:flex;align-items:center;gap:22px;font:600 13px var(--ui);color:var(--txt-2);}
+.topbar nav a{color:var(--txt-2);}
+.topbar nav a:hover{color:var(--txt);text-decoration:none;}
+.wrap{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:calc(100vh - var(--topbar-h));}
+.rail{border-right:1px solid var(--line);background:linear-gradient(180deg,#0C0F14,#0A0C0F);padding:26px 18px;position:sticky;top:var(--topbar-h);align-self:start;height:calc(100vh - var(--topbar-h));overflow-y:auto;}
 .grp{font:700 10px var(--mono);color:var(--txt-3);letter-spacing:1px;text-transform:uppercase;margin:22px 6px 8px;}
 .lnk{display:block;padding:7px 10px;border-radius:8px;font:600 13px var(--ui);color:var(--txt-2);}
 .lnk:hover{background:var(--panel-2);color:var(--txt);text-decoration:none;}
@@ -121,10 +129,16 @@ a:hover{text-decoration:underline;}
 </style>
 </head>
 <body>
+<header class="topbar">
+  <a class="b" href="/">m<em>API</em>ng</a>
+  <span class="sep">/</span>
+  <a class="dtag" href="/doc">docs</a>
+  <nav>
+    {{range .Header}}<a href="{{.Href}}">{{.Label}}</a>{{end}}
+  </nav>
+</header>
 <div class="wrap">
   <aside class="rail">
-    <a class="brand" href="/doc">mAPI-ng <span>docs</span></a>
-    <p class="tagline">Zero-config RED metrics</p>
     {{range .Groups}}
     <div class="grp">{{.Group}}</div>
     {{range .Items}}<a class="lnk{{if .Active}} on{{end}}" href="{{.Href}}">{{.Title}}</a>{{end}}
@@ -133,7 +147,7 @@ a:hover{text-decoration:underline;}
   <main class="main">
     <article class="prose">
       {{.Body}}
-      <div class="foot">mAPI-ng · <a href="/">dashboard</a> · <a href="https://github.com/arhuman/maping">source</a></div>
+      <div class="foot">mAPI-ng · <a href="/">home</a> · <a href="https://github.com/arhuman/maping">source</a></div>
     </article>
   </main>
 </div>
