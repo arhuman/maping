@@ -1,0 +1,64 @@
+---
+status: accepted
+---
+
+# In-app product documentation at /doc
+
+The core server serves its own user-facing product documentation as
+server-rendered pages at **`/doc`** (index) and **`/doc/{topic}`**, sourced from
+Markdown embedded in a new importable `server/docs` package. The pages are public
+(no auth), always mounted — the community build included — so the documentation is
+never empty and never a dead external link.
+
+## Why
+
+The only "documentation" a visitor could reach was a link into the GitHub source
+tree (the `client/` directory). From a user's path that reads as "there are no real
+docs": the README, quickstart, `context.md` glossary and ADRs exist, but they are
+either engineer-facing or off-site. The product needs a small, user-oriented docs
+surface that lives in the running server.
+
+Documentation about the core RED-metrics product (what data is collected, runtime
+overhead, failure/retry behaviour, security and data flow, self-hosting,
+architecture, benchmarks, licensing) describes the **core**, so it belongs in the
+core repo and must exist in every build, not only behind the commercial binary.
+
+## Decisions
+
+- **Markdown, embedded.** Pages are authored as `.md` under `server/docs/content/`
+  and embedded via `//go:embed`. Prose is edited as prose, not as Go string
+  literals, and reuses the README / `context.md` text almost verbatim. Rendering
+  uses `goldmark` (GFM + auto heading IDs) in its safe default (raw HTML in a
+  source file is escaped), so a future externally sourced page cannot inject
+  markup.
+- **Its own public shell, not the dashboard chrome.** `/doc` renders in a
+  standalone dark shell (its own inline CSS, the product palette and fonts) with a
+  left table-of-contents rail. It deliberately does **not** reuse the dashboard's
+  authenticated `RenderShell`: docs must render for anonymous visitors and in the
+  community build, where there is no org/session context. The pages carry a
+  `script-src 'none'` CSP — they are pure HTML + CSS, no JavaScript.
+- **Two composition seams (extends ADR-0016).** So the enterprise binary can add
+  its own doc pages without forking:
+  - `WithDocSections(...docs.Section)` injects entries into the shared table of
+    contents, so an extension's topics appear in the rail on every doc page.
+  - `RouteContext.RenderDoc(w, r, title, body)` wraps an extension-produced body
+    (rendered from its own embedded Markdown via the exported
+    `docs.MarkdownToHTML`) in the exact same shell and merged TOC. An extension
+    page is therefore indistinguishable from a core one.
+  The `server/docs` package is intentionally **not** `internal/`, so a composing
+  module can import `Section` / `MarkdownToHTML`.
+- **Routing.** `/doc` and `/doc/{topic}` mount on the outer (unauthenticated) mux
+  like `/login`. Extension pages mount on more specific patterns (`/doc/billing`),
+  which take Go 1.22 ServeMux precedence over the `{topic}` wildcard; an unknown
+  core slug is a 404, never a blank shell.
+
+## Consequences
+
+- The docs are a first-class core feature: a lone self-hosted/community deployment
+  serves the full product documentation with no configuration.
+- Adding or editing a core page is editing one Markdown file; the section registry
+  (`coreSections`) controls its title and order in the rail.
+- The enterprise binary owns only its *additional* pages and their section entries;
+  it does not duplicate core doc content (see enterprise ADR-0009).
+- A new dependency (`goldmark`) enters the core module — a small, widely used,
+  pure-Go Markdown library with no transitive service dependencies.

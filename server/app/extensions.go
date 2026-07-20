@@ -8,6 +8,8 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/arhuman/maping/server/docs"
 )
 
 // The extension seam: a composed build (a separate module that imports
@@ -38,6 +40,13 @@ type RouteContext struct {
 	// instead of a detached page. content is trusted HTML the caller produced from a
 	// template; title sets the top-bar heading and browser tab. Always non-nil.
 	RenderShell func(w http.ResponseWriter, r *http.Request, title string, content template.HTML)
+	// RenderDoc writes a full public documentation page (the /doc dark shell with the
+	// shared table of contents in the left rail) wrapping the given body, so an
+	// extension's own doc page is indistinguishable from a core one. body is trusted
+	// HTML — a composing build produces it from its embedded Markdown via
+	// docs.MarkdownToHTML. Unlike RenderShell the page is public (no auth chrome), so
+	// this is the seam for extension /doc/* pages. Always non-nil.
+	RenderDoc func(w http.ResponseWriter, r *http.Request, title string, body template.HTML)
 }
 
 // JobContext is what a WithBackgroundJob task receives. Ctx is cancelled at
@@ -93,6 +102,7 @@ type options struct {
 	memberAdmin      MemberAdminFactory
 	publicHome       http.HandlerFunc
 	accountHref      string
+	docSections      []docs.Section
 }
 
 // Option configures Run.
@@ -155,6 +165,15 @@ func WithPublicHome(home http.HandlerFunc) Option {
 	return func(o *options) { o.publicHome = home }
 }
 
+// WithDocSections adds entries to the shared /doc table of contents (the left
+// rail on every documentation page). A composing build registers its own doc
+// topics here so they appear alongside the core product pages; it mounts the pages
+// themselves via WithRoutes, rendering each through RouteContext.RenderDoc. Public
+// default: none, so the community build shows only the core product sections.
+func WithDocSections(sections ...docs.Section) Option {
+	return func(o *options) { o.docSections = append(o.docSections, sections...) }
+}
+
 // WithAccountLink turns the dashboard sidebar's user-identity block into a link to
 // href — a composing build points it at the account page it owns (e.g. "/account").
 // Public default: empty, so the block stays a non-interactive display element. The
@@ -168,9 +187,9 @@ func WithAccountLink(href string) Option {
 // core routes are mounted. pool is nil in static dev mode; gate and sessionOrg are
 // nil when auth is off, so a registrar needing authenticated routes checks them
 // and mounts nothing when absent.
-func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
+func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), renderDoc func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
 	for _, r := range routes {
-		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, RenderShell: renderShell})
+		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, RenderShell: renderShell, RenderDoc: renderDoc})
 	}
 	if len(routes) > 0 {
 		log.Info("extension routes mounted", slog.Int("count", len(routes)))

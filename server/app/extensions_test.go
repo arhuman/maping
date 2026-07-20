@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,15 +53,17 @@ func TestWithLoginInterceptorAndMemberAdminSetOptions(t *testing.T) {
 func TestMountExtensionsMountsExtraRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	called := false
+	renderDoc := func(http.ResponseWriter, *http.Request, string, template.HTML) {}
 	mountExtensions(mux, []RouteRegistrar{
 		func(rc RouteContext) {
 			called = true
 			require.NotNil(t, rc.Mux)
+			require.NotNil(t, rc.RenderDoc, "RenderDoc capability must reach the registrar")
 			rc.Mux.HandleFunc("GET /ext/ping", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte("pong"))
 			})
 		},
-	}, nil, nil, nil, nil, testLogger())
+	}, nil, nil, nil, nil, renderDoc, testLogger())
 
 	require.True(t, called, "registrar must be invoked")
 	rec := httptest.NewRecorder()

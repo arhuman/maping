@@ -64,6 +64,16 @@ the real released versions of its siblings (no local `replace` directives leak t
 
 ---
 
+## Documentation
+
+The running server serves user-facing documentation at **`/doc`** — quickstart, what
+data is collected, runtime overhead, failure and retry behaviour, security and data
+flow, self-hosting, architecture, benchmarks, and licensing. It is public and needs no
+configuration (the community build included). Deeper design rationale lives in
+[`docs/adr/`](docs/adr/).
+
+---
+
 ## Getting started
 
 **Run the collector and dashboard (one command):**

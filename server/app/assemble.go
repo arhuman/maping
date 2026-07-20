@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"github.com/arhuman/maping/server/docs"
 	"github.com/arhuman/maping/server/internal/auth"
 	"github.com/arhuman/maping/server/internal/control"
 	"github.com/arhuman/maping/server/internal/guardrail"
@@ -103,6 +104,14 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	mountDashboard(mux, webHandler, o.publicHome, authLayer, log)
 	mountIngest(mux, d.ingestHandler, maxBodyCeiling(log))
 
+	// Public product documentation at /doc — always mounted (community build
+	// included), unauthenticated, on the outer mux like /login. The handler carries
+	// the merged table of contents (core product pages + any extension-injected
+	// sections), and its Render is handed to extensions as RenderDoc so their own
+	// /doc/* pages share the exact chrome and TOC.
+	docsHandler := docs.NewHandler(o.docSections, log)
+	docsHandler.Register(mux)
+
 	// Extension routes mount after the core surfaces so their patterns compose by
 	// ServeMux precedence. The pool is nil in static dev mode (no control plane).
 	// gate/sessionOrg give a registrar the dashboard auth middleware and the
@@ -116,7 +125,7 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 		gate = authLayer.Middleware
 		sessionOrg = auth.TenantFromContext
 	}
-	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, webHandler.RenderShellPage, log)
+	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, webHandler.RenderShellPage, docsHandler.Render, log)
 
 	// Background loops (extension jobs) share one context, cancelled on shutdown so
 	// every goroutine exits before the pool closes.
