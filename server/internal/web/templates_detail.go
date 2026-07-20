@@ -76,7 +76,7 @@ const tplDetailHTML = `
     </div>
     {{end}}
     {{if .Diagnosis.TopCause.Falsifier}}
-    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft);font:500 11.5px var(--mono);color:var(--txt-3);"><span style="color:var(--txt-2);">Falsifier:</span> {{.Diagnosis.TopCause.Falsifier}}</div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft);font:500 11.5px var(--mono);color:var(--txt-3);"><span style="color:var(--txt-2);">Rules this out:</span> {{.Diagnosis.TopCause.Falsifier}}</div>
     {{end}}
     {{if .Diagnosis.Others}}
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
