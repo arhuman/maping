@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"html/template"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
@@ -111,6 +112,21 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	// /doc/* pages share the exact chrome and TOC.
 	docsHandler := docs.NewHandler(o.docSections, o.docHeader, log)
 	docsHandler.Register(mux)
+
+	// With dashboard auth on, a signed-in visitor gets every doc page (core and
+	// extension alike, since both flow through docsHandler.Render) inside the
+	// dashboard chrome instead of the standalone public shell. The render func
+	// wraps itself in the auth middleware so the verified session lands in the
+	// request context — the sidebar tenant resolution and ingest-key mask need it.
+	// The middleware cannot redirect here: this path is only taken after
+	// Authenticated(r) already reported the same cookie valid.
+	if authLayer != nil {
+		docsHandler.EnableInApp(authLayer.Authenticated, func(w http.ResponseWriter, r *http.Request, title string, content template.HTML) {
+			authLayer.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				webHandler.RenderDocPage(w, r, title, content)
+			})).ServeHTTP(w, r)
+		})
+	}
 
 	// Extension routes mount after the core surfaces so their patterns compose by
 	// ServeMux precedence. The pool is nil in static dev mode (no control plane).

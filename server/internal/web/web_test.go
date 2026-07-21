@@ -183,6 +183,23 @@ func TestRenderShellPage(t *testing.T) {
 	assert.Contains(t, body, `<a href="/account" class="userbox">`, "user block links to account inside the shell page too")
 }
 
+func TestRenderDocPageLightsDocumentationNav(t *testing.T) {
+	h, err := NewHandler(Config{Querier: fakeQuerier{}, Tenant: constTenant})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	h.RenderDocPage(rec, httptest.NewRequest(http.MethodGet, "/doc/quickstart", nil),
+		"Quickstart", template.HTML(`<div class="doc-wrap">DOC-CONTENT</div>`))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+	assert.Contains(t, body, "DOC-CONTENT", "doc fragment renders inside the shell")
+	assert.Contains(t, body, `class="aside"`, "sidebar chrome renders")
+	assert.Contains(t, body, `<a href="/doc" class="nav-item on">`, "Documentation nav item is lit")
+	assert.NotContains(t, body, `<a href="/?win=1h" class="nav-item on">`, "Services stays unlit")
+	assert.Contains(t, body, `<a href="/doc" class="c-accent">docs</a>`, "breadcrumb links back to /doc")
+	assert.Contains(t, body, "mAPI-ng — Quickstart", "browser title set from page title")
+}
+
 func TestCopyJSAssetServed(t *testing.T) {
 	srv := newServer(t, Config{Querier: fakeQuerier{}, Tenant: constTenant})
 

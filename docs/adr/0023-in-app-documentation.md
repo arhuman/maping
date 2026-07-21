@@ -31,12 +31,22 @@ core repo and must exist in every build, not only behind the commercial binary.
   uses `goldmark` (GFM + auto heading IDs) in its safe default (raw HTML in a
   source file is escaped), so a future externally sourced page cannot inject
   markup.
-- **Its own public shell, not the dashboard chrome.** `/doc` renders in a
-  standalone dark shell (its own inline CSS, the product palette and fonts) with a
-  left table-of-contents rail. It deliberately does **not** reuse the dashboard's
-  authenticated `RenderShell`: docs must render for anonymous visitors and in the
-  community build, where there is no org/session context. The pages carry a
-  `script-src 'none'` CSP — they are pure HTML + CSS, no JavaScript.
+- **Standalone shell for anonymous visitors, dashboard chrome for signed-in
+  users.** For an anonymous request `/doc` renders in a standalone dark shell (its
+  own inline CSS, the product palette and fonts) with a left table-of-contents
+  rail — docs must render without an org/session context, and in the community
+  build (no auth layer) every request takes this path. These pages carry a
+  `script-src 'none'` CSP — pure HTML + CSS, no JavaScript. When dashboard auth is
+  on and the request carries a valid session, the same pages render **inside the
+  dashboard chrome** instead: the composition root wires
+  `docs.Handler.EnableInApp(authLayer.Authenticated, ...)`, and `Render` hands the
+  doc fragment (same grouped TOC rail + prose, `doc-`-prefixed scoped styles) to
+  `web.RenderDocPage`, which lights the Documentation sidebar item and adds a
+  `docs → <title>` breadcrumb. The render func wraps itself in the auth middleware
+  so the verified session lands in the request context (sidebar tenant and
+  ingest-key mask); it cannot redirect, since it only runs after `Authenticated`
+  reported the cookie valid. Clicking Documentation therefore never drops a
+  signed-in user out of the dashboard onto a marketing-looking page.
 - **Two composition seams (extends ADR-0016).** So the enterprise binary can add
   its own doc pages without forking:
   - `WithDocSections(...docs.Section)` injects entries into the shared table of
@@ -44,7 +54,8 @@ core repo and must exist in every build, not only behind the commercial binary.
   - `RouteContext.RenderDoc(w, r, title, body)` wraps an extension-produced body
     (rendered from its own embedded Markdown via the exported
     `docs.MarkdownToHTML`) in the exact same shell and merged TOC. An extension
-    page is therefore indistinguishable from a core one.
+    page is therefore indistinguishable from a core one — including the
+    anonymous/signed-in split above, since both flow through the same `Render`.
   - `WithDocHeader(template.HTML)` injects a full site header rendered above every
     doc page, so the documentation wears the same chrome as the rest of the site
     (same logo, nav, and calls to action) rather than a detached bar — the fix for

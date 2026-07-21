@@ -1,10 +1,13 @@
 // Package docs serves the public, server-rendered product documentation at /doc.
-// It owns the doc shell (its own dark chrome, no dashboard auth), a Markdown
-// renderer, and the table-of-contents model. Core registers its own product pages
-// from embedded Markdown; a composing build adds pages of its own by injecting
-// Sections (for the shared left rail) and rendering its Markdown through the
-// RenderDoc capability the app hands it — so every doc page looks identical
-// whichever module served it.
+// It owns the doc shell (its own dark chrome, no dashboard auth required), a
+// Markdown renderer, and the table-of-contents model. Core registers its own
+// product pages from embedded Markdown; a composing build adds pages of its own
+// by injecting Sections (for the shared left rail) and rendering its Markdown
+// through the RenderDoc capability the app hands it — so every doc page looks
+// identical whichever module served it. When the app wires EnableInApp (dashboard
+// auth on), a signed-in visitor gets the same pages inside the dashboard chrome
+// instead of the standalone shell; anonymous visitors and auth-less builds keep
+// the standalone rendering.
 package docs
 
 import (
@@ -66,6 +69,12 @@ type Handler struct {
 	nav    []Section
 	header template.HTML
 	log    *slog.Logger
+	// authed + renderApp are the optional in-app collaborators (see EnableInApp):
+	// when both are set and authed(r) is true, Render hands a two-column doc
+	// fragment to renderApp (the dashboard chrome) instead of writing the
+	// standalone shell. Both nil in the community build (no auth layer).
+	authed    func(*http.Request) bool
+	renderApp func(http.ResponseWriter, *http.Request, string, template.HTML)
 }
 
 // NewHandler builds the doc handler, merging the injected extension sections after
@@ -124,8 +133,15 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, slug, active
 // Render wraps a rendered body in the doc shell with the rail lit for the current
 // request path. It is the capability the app exposes as RouteContext.RenderDoc so
 // a composing build renders its own pages in this exact chrome, with the shared
-// table of contents, without importing this package's internals.
+// table of contents, without importing this package's internals. When EnableInApp
+// was wired and the request is authenticated, the page renders inside the
+// dashboard chrome instead — core and extension doc pages take the exact same
+// branch, so the two never diverge.
 func (h *Handler) Render(w http.ResponseWriter, r *http.Request, title string, body template.HTML) {
+	if h.authed != nil && h.renderApp != nil && h.authed(r) {
+		h.renderInApp(w, r, title, body)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 	data := shellData{Title: title, Body: body, Groups: h.groups(r.URL.Path), Header: h.header}

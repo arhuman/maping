@@ -180,7 +180,24 @@ func (h *Handler) buildShell(r *http.Request, activeNav string, crumbs []crumb, 
 // content is trusted HTML the caller has already escaped/produced from a template;
 // title sets the top-bar heading and the browser tab.
 func (h *Handler) RenderShellPage(w http.ResponseWriter, r *http.Request, title string, content template.HTML) {
-	shell := h.buildShell(r, "", []crumb{{Label: title}}, title, false, normalizeWindow(r.URL.Query().Get("win")))
+	h.renderShellContent(w, r, "", []crumb{{Label: title}}, title, content)
+}
+
+// RenderDocPage renders a documentation page inside the dashboard chrome: the
+// Documentation sidebar item lit and a breadcrumb trail back to /doc. It is the
+// in-app counterpart of the standalone public doc shell — the docs handler routes
+// a signed-in request here so clicking Documentation never drops the user out of
+// the dashboard onto a marketing-looking page.
+func (h *Handler) RenderDocPage(w http.ResponseWriter, r *http.Request, title string, content template.HTML) {
+	h.renderShellContent(w, r, "docs", []crumb{{Label: "docs", Href: "/doc"}, {Label: title}}, title, content)
+}
+
+// renderShellContent is the shared "shellpage" executor behind RenderShellPage
+// and RenderDocPage: it builds the per-request chrome with the given active nav
+// item and breadcrumbs, then renders the trusted content into the dashboard's
+// content area.
+func (h *Handler) renderShellContent(w http.ResponseWriter, r *http.Request, activeNav string, crumbs []crumb, title string, content template.HTML) {
+	shell := h.buildShell(r, activeNav, crumbs, title, false, normalizeWindow(r.URL.Query().Get("win")))
 	data := struct {
 		Shell   Shell
 		Title   string

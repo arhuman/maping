@@ -1,6 +1,7 @@
 package docs
 
 import (
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -91,6 +92,44 @@ func TestCommunityBuildFallsBackToHomeBrand(t *testing.T) {
 	assert.Contains(t, body, `class="topbar"`)
 	assert.Contains(t, body, `class="b" href="/"`)
 	assert.NotContains(t, body, `/pricing`)
+}
+
+func TestRenderInAppWhenAuthenticated(t *testing.T) {
+	h, mux := testHandler(Section{Group: "Enterprise", Title: "Billing", Href: "/doc/billing", Order: 1})
+	var gotTitle string
+	var gotContent template.HTML
+	h.EnableInApp(
+		func(*http.Request) bool { return true },
+		func(w http.ResponseWriter, _ *http.Request, title string, content template.HTML) {
+			gotTitle, gotContent = title, content
+			w.WriteHeader(http.StatusOK)
+		},
+	)
+	rec := get(t, mux, "/doc/quickstart")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "Quickstart", gotTitle, "in-app render receives the page title")
+	frag := string(gotContent)
+	assert.NotContains(t, frag, "<html", "in-app content is a fragment, not a full page")
+	assert.NotContains(t, frag, `class="topbar"`, "no standalone chrome in the fragment")
+	assert.Contains(t, frag, `class="doc-lnk on" href="/doc/quickstart"`, "active TOC link lit")
+	assert.Contains(t, frag, `href="/doc/architecture"`, "core TOC present in the fragment")
+	assert.Contains(t, frag, `href="/doc/billing"`, "injected sections share the in-app TOC too")
+}
+
+func TestRenderStandaloneWhenAnonymous(t *testing.T) {
+	h, mux := testHandler()
+	called := false
+	h.EnableInApp(
+		func(*http.Request) bool { return false },
+		func(http.ResponseWriter, *http.Request, string, template.HTML) { called = true },
+	)
+	rec := get(t, mux, "/doc")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, called, "anonymous request must not take the in-app path")
+	body := rec.Body.String()
+	assert.Contains(t, body, "<html", "standalone shell renders for anonymous visitors")
+	assert.Contains(t, body, `class="topbar"`)
+	assert.Equal(t, contentSecurityPolicy, rec.Header().Get("Content-Security-Policy"))
 }
 
 func TestMarkdownRendersTablesAndCode(t *testing.T) {
