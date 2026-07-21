@@ -1,10 +1,17 @@
 # mAPI-ng — Context Glossary
 
-> **mAPI-ng** (monitored API, NextGen): hosted, zero-config API observability for Go
-> services. Two pillars: **Simplicity** (Go-specialized, zero-config, no
-> Prometheus/Grafana to set up) and **Performance** (more data/s ingested, less
-> disk used, faster retrieval). Positioned against OpenTelemetry+Prometheus+Grafana
-> on onboarding UX and cost/performance, not on flexibility.
+> **mAPI-ng** (monitored API, NextGen): evidence-backed incident diagnosis for Go
+> services. Three principles: **Diagnosis** (the value: correlate RED, Go runtime,
+> per-instance USE, memory, downstream, deployment and version signals as a pure
+> function over data the page already loads, then rank the likely causes with the
+> evidence behind each and a falsifier, or answer "Unattributed" rather than invent
+> one), **Simplicity** (Go-specialized, zero-config, no Prometheus/Grafana to set
+> up), and **Efficiency** (DDSketch local aggregation, compact summaries, time-range
+> rollups: more data/s ingested, less disk, faster retrieval). Available as a hosted
+> service (free tier, no card) or fully self-hosted from the MIT stack. Positioned
+> against OpenTelemetry+Prometheus+Grafana on onboarding UX, interpretation, and
+> cost/performance, not on flexibility; it does not replace distributed tracing or
+> custom dashboards.
 
 ## Terms
 
@@ -107,8 +114,8 @@ is stamped with the server-resolved tenant. There is no infrastructure wall betw
 tenants, so all isolation is software-enforced.
 
 **Language-agnostic server** — the collector, wire contract (protobuf), and storage
-schema contain no Go-isms; "Go-specialized" describes client DX and go-to-market, not
-the server. Go is the sole v1 client, but a polyglot client is a cheap future
+schema contain no Go-isms; "Go-specialized" describes client DX and how the product is
+presented, not the server. Go is the sole v1 client, but a polyglot client is a cheap future
 expansion needing no server change. Go-only fields (if ever added) go in an optional
 extension block, never the shared metrics schema.
 
@@ -126,10 +133,22 @@ under a distinct no-status class. The dashboard always shows the
 4xx/5xx/timeout breakdown alongside the headline so operators can see *why* the rate
 is high (raw 4xx includes bot 404s and expired-token 401s).
 
-**Dashboard** — a fixed, non-configurable, auto-generated 3-level RED view (service
-overview → endpoint table → endpoint detail with a latency histogram rendered from
-the DDSketch), served by mAPI-ng's own ClickHouse-backed web app. No custom panels,
-no query builder, no user dashboards in v1. Alerting is deferred to v2.
+**Dashboard**: a fixed, non-configurable, auto-generated 3-level view (service
+overview → endpoint table → endpoint detail), served by mAPI-ng's own
+ClickHouse-backed web app. The endpoint-detail tier is the diagnosis surface: a
+latency histogram rendered from the DDSketch, per-instance USE gauges, the memory
+trend, the downstream split, and the ranked-cause **diagnosis card**. No custom
+panels, no query builder, no user dashboards in v1. Alerting is deferred to v2.
+
+**Diagnosis** (ADR-0021): the endpoint-detail engine that correlates the page's
+signals (RED, USE, memory, downstream, versions, instances) and ranks 8 cause
+families: memory/GC, CPU, connection/pool congestion, overload/timeouts, goroutine
+leak, downstream/IO, instance-localized, and release regression. It is a pure
+function over data the page already loads. Each ranked cause carries evidence
+bullets and a falsifier (shown as "Rules this out:"); confidence is a discrete tier
+(High/Medium/Low, e.g. "High (3/4 signals)"), never a percentage. When the endpoint
+is anomalous but no rule fires, the top cause is "Unattributed", so the card never
+invents a cause.
 
 **Rollup** — server-side aggregation of Summaries into coarser time tiers
 (10s → 1min → 1hour → 1day). Counters sum; sketches merge bucket-wise. Fine tiers
