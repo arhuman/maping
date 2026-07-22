@@ -324,28 +324,69 @@ func touch(b []byte) {
 	memSink.Add(uint64(acc))
 }
 
-// held is the leaked memory for /fault/leak: buffers retained forever (until
-// reset), so the post-GC live heap climbs monotonically. heldBytes tracks the
-// total for the response.
+// leakNode is a tiny pointer-bearing object. A retained []byte holds no pointers,
+// so the GC skips scanning its contents and a byte-only leak moves the heap
+// without ever touching latency. Retaining a large graph of leakNodes instead
+// makes every GC mark cycle walk millions of live pointers, so GC CPU climbs and
+// allocating goroutines pay mark-assist — the leak now degrades latency as it grows.
+type leakNode struct{ next *leakNode }
+
+// held is the leaked memory for /fault/leak: byte buffers plus pointer-graph
+// objects retained forever (until reset), so the post-GC live heap climbs
+// monotonically and GC mark cost climbs with it. heldBytes tracks the byte total
+// for the response.
 var (
 	heldMu    sync.Mutex
 	held      [][]byte
+	heldNodes [][]*leakNode
 	heldBytes int64
 )
 
-// handleLeak retains kb KiB of heap on each call, never freeing it, so the post-GC
-// live heap grows as a staircase — the signature of a leak (vs the sawtooth of a
-// burst). Knob: ?kb=256. Released by /fault/reset.
+// handleLeak retains kb KiB of byte heap on each call, never freeing it, so the
+// post-GC live heap grows as a staircase — the signature of a leak (vs the sawtooth
+// of a burst). It also retains objs pointer-bearing objects (default scales with kb)
+// so GC mark cost, and thus latency under allocation, grows with the leak. Knobs:
+// ?kb=256, ?objs. Released by /fault/reset.
 func handleLeak(c *gin.Context) {
 	kb := qint(c, "kb", 256, 0, 1024*1024)
 	b := make([]byte, kb*1024)
 	touch(b)
+	objs := qint(c, "objs", kb*128, 0, 64*1024*1024)
+	nodes := make([]*leakNode, objs)
+	for i := range nodes {
+		nodes[i] = &leakNode{}
+		if i > 0 {
+			nodes[i].next = nodes[i-1] // a real live-pointer chain for the GC to walk
+		}
+	}
 	heldMu.Lock()
 	held = append(held, b)
+	heldNodes = append(heldNodes, nodes)
 	heldBytes += int64(len(b))
 	total := heldBytes
+	depth := len(heldNodes) // how many times we have leaked so far
 	heldMu.Unlock()
-	c.JSON(http.StatusOK, gin.H{"held_bytes": total})
+
+	// A WORSENING leak: per-request transient garbage scales with how much has
+	// already leaked (churn>0 enables it), so alloc rate, GC frequency and GC CPU
+	// ramp up as the heap grows — instead of a lone heap-climb signal, the incident
+	// correlates four runtime signals at once (the High-confidence, hard-for-a-human
+	// case). churn=0 keeps the pure retain-only leak (a single-signal case).
+	if churn := qint(c, "churn", 0, 0, 100000); churn > 0 {
+		reps := depth * churn
+		if reps > 500000 {
+			reps = 500000 // clamp so a long demo plateaus instead of exploding
+		}
+		garbage := make([][]byte, reps)
+		var acc byte
+		for i := range garbage {
+			garbage[i] = make([]byte, 64)
+			garbage[i][0] = byte(i)
+			acc ^= garbage[i][0]
+		}
+		memSink.Add(uint64(acc)) // defeat dead-code elimination; garbage drops here
+	}
+	c.JSON(http.StatusOK, gin.H{"held_bytes": total, "held_objs": objs, "depth": depth})
 }
 
 // handleSpike allocates mb MiB, touches it, then drops it (no retention), so the
@@ -414,6 +455,7 @@ func handleReset(c *gin.Context) {
 	heldMu.Lock()
 	freed := heldBytes
 	held = nil
+	heldNodes = nil
 	heldBytes = 0
 	heldMu.Unlock()
 	c.JSON(http.StatusOK, gin.H{

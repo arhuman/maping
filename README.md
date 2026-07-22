@@ -15,8 +15,10 @@ Instrument in a few lines: two imports, construct a recorder, add one middleware
 var. An absent key makes the middleware a no-op, so adding mAPI-ng is always safe and
 activation is decoupled from the code change.
 
-<!-- TODO(track-4): add docs/img/diagnosis-card.png here: the endpoint-detail diagnosis card
-     (top cause, evidence bullets, "Rules this out:", also-considered causes). -->
+![Endpoint-detail diagnosis card: "Memory / GC pressure, High (3/4 signals)" ranking a
+worsening memory leak from correlated evidence (post-GC heap climbing 3.4x, allocation rate
+835x baseline, GC frequency 111x baseline), with a rising heap chart and a falsifier line that
+says what would rule the cause out.](docs/img/diagnosis-card.png)
 
 ---
 
