@@ -56,7 +56,46 @@ func upsertMemberFromOIDC(ctx context.Context, tb txBeginner, oidcSubject, email
 		return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: lookup: %w", err)
 	}
 
-	// First login: create an org-of-one and its admin member atomically. Name
+	// First login for this identity: link into an org already owned by this verified
+	// email, or mint a fresh org-of-one. Both paths commit tx.
+	return firstLoginOrLink(ctx, tx, oidcSubject, email)
+}
+
+// firstLoginOrLink handles the no-existing-member path inside tx. It first tries to
+// link the identity into an org that already belongs to this verified email — the
+// same human signing in through a second provider (github: vs google:) — preferring a
+// paid org over free and otherwise the oldest, so a person keeps a single org/plan
+// instead of a duplicate per provider. A match inserts a new admin member there and
+// reports isNew=false (an existing org, so no reveal-once key interstitial). With no
+// such org it creates an org-of-one and its admin member, reporting isNew=true. email
+// is provider-verified (auth.userinfo), which is what makes cross-provider linking
+// safe. It commits tx on success.
+func firstLoginOrLink(ctx context.Context, tx pgx.Tx, oidcSubject, email string) (orgID, memberID, role string, isNew bool, err error) {
+	err = tx.QueryRow(ctx,
+		`SELECT id::text FROM orgs
+		   WHERE id IN (SELECT org_id FROM members WHERE lower(email) = lower($1))
+		   ORDER BY (plan <> 'free') DESC, created_at ASC
+		   LIMIT 1`, email,
+	).Scan(&orgID)
+	switch {
+	case err == nil:
+		role = "admin"
+		if err = tx.QueryRow(ctx,
+			`INSERT INTO members (org_id, email, role, oidc_subject)
+			 VALUES ($1, $2, 'admin', $3) RETURNING id::text`,
+			orgID, email, oidcSubject,
+		).Scan(&memberID); err != nil {
+			return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: link member: %w", err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: commit link: %w", err)
+		}
+		return orgID, memberID, role, false, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: link lookup: %w", err)
+	}
+
+	// No existing org for this email: create an org-of-one and its admin member. Name
 	// the org after the email so the dashboard has a human label.
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO orgs (name, plan) VALUES ($1, 'free') RETURNING id::text`, email,
@@ -71,7 +110,6 @@ func upsertMemberFromOIDC(ctx context.Context, tb txBeginner, oidcSubject, email
 	).Scan(&memberID); err != nil {
 		return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: create member: %w", err)
 	}
-
 	if err = tx.Commit(ctx); err != nil {
 		return "", "", "", false, fmt.Errorf("control.UpsertMemberFromOIDC: commit create: %w", err)
 	}

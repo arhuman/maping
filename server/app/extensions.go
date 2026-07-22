@@ -35,6 +35,12 @@ type RouteContext struct {
 	// caller's org (never the request body), keeping the session context key
 	// private to auth. Nil when auth is off.
 	SessionOrg func(*http.Request) (orgID string, ok bool)
+	// SessionMemberID reads the caller's verified member id from a request that has
+	// passed through Gate. Like SessionOrg it reads the private auth session context
+	// key an extension cannot reach directly, so an extension can resolve the caller's
+	// own member row (e.g. their email) without trusting request input. Nil when auth
+	// is off.
+	SessionMemberID func(*http.Request) (memberID string, ok bool)
 	// RenderShell writes a full dashboard page (sidebar + top bar chrome) wrapping
 	// the given content, so an extension's own page looks native to the dashboard
 	// instead of a detached page. content is trusted HTML the caller produced from a
@@ -198,9 +204,9 @@ func WithAccountLink(href string) Option {
 // core routes are mounted. pool is nil in static dev mode; gate and sessionOrg are
 // nil when auth is off, so a registrar needing authenticated routes checks them
 // and mounts nothing when absent.
-func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), renderDoc func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
+func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), sessionMemberID func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), renderDoc func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
 	for _, r := range routes {
-		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, RenderShell: renderShell, RenderDoc: renderDoc})
+		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, SessionMemberID: sessionMemberID, RenderShell: renderShell, RenderDoc: renderDoc})
 	}
 	if len(routes) > 0 {
 		log.Info("extension routes mounted", slog.Int("count", len(routes)))

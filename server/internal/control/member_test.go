@@ -65,8 +65,10 @@ func TestUpsertMemberFromOIDCExisting(t *testing.T) {
 }
 
 func TestUpsertMemberFromOIDCFirstLoginCreatesAdminOrgOfOne(t *testing.T) {
-	// 1) member lookup -> no rows; 2) INSERT org RETURNING id; 3) INSERT member RETURNING id.
+	// 1) member lookup by subject -> no rows; 2) email -> existing org lookup -> no
+	// rows (novel email); 3) INSERT org RETURNING id; 4) INSERT member RETURNING id.
 	tx := &fakeTx{rows: []fakeRow{
+		{err: pgx.ErrNoRows},
 		{err: pgx.ErrNoRows},
 		{values: []any{"org-new"}},
 		{values: []any{"member-new"}},
@@ -86,6 +88,34 @@ func TestUpsertMemberFromOIDCFirstLoginCreatesAdminOrgOfOne(t *testing.T) {
 	}
 	if !tx.committed {
 		t.Error("first-login path must commit after creating org+member")
+	}
+}
+
+func TestUpsertMemberFromOIDCFirstLoginLinksExistingEmailOrg(t *testing.T) {
+	// A second provider identity for a verified email that already owns an org must
+	// link into that org instead of creating a new one.
+	// 1) member lookup by subject -> no rows; 2) email -> existing org "org-1";
+	// 3) INSERT member into org-1 RETURNING id. No org is created.
+	tx := &fakeTx{rows: []fakeRow{
+		{err: pgx.ErrNoRows},
+		{values: []any{"org-1"}},
+		{values: []any{"member-2"}},
+	}}
+	org, mem, role, isNew, err := upsertMemberFromOIDC(context.Background(), &fakeTxBeginner{tx: tx}, "google:sub", "dup@user.dev")
+	if err != nil {
+		t.Fatalf("upsertMemberFromOIDC: %v", err)
+	}
+	if org != "org-1" || mem != "member-2" {
+		t.Errorf("got org=%q member=%q, want org-1/member-2", org, mem)
+	}
+	if role != "admin" {
+		t.Errorf("linked member should be admin, got %q", role)
+	}
+	if isNew {
+		t.Error("linking to an existing org must report isNew=false (no fresh-key interstitial)")
+	}
+	if !tx.committed {
+		t.Error("link path must commit")
 	}
 }
 

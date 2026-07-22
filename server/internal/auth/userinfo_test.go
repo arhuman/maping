@@ -173,15 +173,17 @@ func TestGithubIdentity_HappyPath(t *testing.T) {
 	}
 }
 
-// TestGithubIdentity_FallsBackToProfileEmail verifies that when the /user/emails
-// endpoint returns no verified primary, the public profile email is used.
-func TestGithubIdentity_FallsBackToProfileEmail(t *testing.T) {
+// TestGithubIdentity_RejectsUnverifiedProfileEmail verifies that when /user/emails
+// has no verified primary, the login is REJECTED rather than falling back to the
+// (possibly unverified) public profile email. The identity is linked to an account
+// by email downstream, so an unverified address must never reach a member row.
+func TestGithubIdentity_RejectsUnverifiedProfileEmail(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"id": 42, "email": "profile@example.com"})
 	})
-	// /user/emails returns unverified entries — no match, so fall back.
+	// /user/emails returns only unverified entries — no verified primary to trust.
 	mux.HandleFunc("/user/emails", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]map[string]any{
@@ -194,12 +196,12 @@ func TestGithubIdentity_FallsBackToProfileEmail(t *testing.T) {
 	client := srv.Client()
 	client.Transport = rewriteTransport{base: srv.URL, inner: srv.Client().Transport}
 
-	id, err := githubIdentity(context.Background(), client, nil, fakeToken())
-	if err != nil {
-		t.Fatalf("githubIdentity error: %v", err)
+	_, err := githubIdentity(context.Background(), client, nil, fakeToken())
+	if err == nil {
+		t.Fatal("expected error when no verified primary email is available")
 	}
-	if id.Email != "profile@example.com" {
-		t.Errorf("email = %q, want profile@example.com (profile fallback)", id.Email)
+	if !strings.Contains(err.Error(), "no verified primary email") {
+		t.Errorf("error %q should mention 'no verified primary email'", err.Error())
 	}
 }
 
@@ -226,17 +228,18 @@ func TestGithubIdentity_MissingID(t *testing.T) {
 	}
 }
 
-// TestGithubIdentity_NoEmail verifies that a missing email (zero profile email,
-// no verified primary) is rejected.
-func TestGithubIdentity_NoEmail(t *testing.T) {
+// TestGithubIdentity_EmailsEndpointFailure verifies that when the /user/emails
+// lookup fails, the login is rejected: since the verified primary is now the ONLY
+// trusted email source (no profile fallback), a failed lookup cannot yield an
+// identity.
+func TestGithubIdentity_EmailsEndpointFailure(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// email is empty string in the profile
 		json.NewEncoder(w).Encode(map[string]any{"id": 7})
 	})
 	mux.HandleFunc("/user/emails", func(w http.ResponseWriter, _ *http.Request) {
-		// Return a non-200 to simulate the emails endpoint failing
+		// Non-200 simulates the emails endpoint failing.
 		http.Error(w, "not found", http.StatusNotFound)
 	})
 	srv := httptest.NewServer(mux)
@@ -247,10 +250,10 @@ func TestGithubIdentity_NoEmail(t *testing.T) {
 
 	_, err := githubIdentity(context.Background(), client, nil, fakeToken())
 	if err == nil {
-		t.Fatal("expected error for missing email")
+		t.Fatal("expected error when the github emails lookup fails")
 	}
-	if !strings.Contains(err.Error(), "no verified email") {
-		t.Errorf("error %q should mention 'no verified email'", err.Error())
+	if !strings.Contains(err.Error(), "github emails") {
+		t.Errorf("error %q should mention the failed 'github emails' lookup", err.Error())
 	}
 }
 

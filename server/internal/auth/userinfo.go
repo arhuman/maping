@@ -86,8 +86,7 @@ func getJSON(ctx context.Context, client *http.Client, url string, tok *oauth2.T
 // githubIdentity reads the GitHub user id and a verified primary email.
 func githubIdentity(ctx context.Context, client *http.Client, _ *oauth2.Config, tok *oauth2.Token) (identity, error) {
 	var user struct {
-		ID    int64  `json:"id"`
-		Email string `json:"email"`
+		ID int64 `json:"id"`
 	}
 	if err := getJSON(ctx, client, "https://api.github.com/user", tok, &user); err != nil {
 		return identity{}, err
@@ -96,24 +95,27 @@ func githubIdentity(ctx context.Context, client *http.Client, _ *oauth2.Config, 
 		return identity{}, fmt.Errorf("auth: github user has no id")
 	}
 
-	email := user.Email
-	// The public profile email may be null; fetch the verified primary from the
-	// emails endpoint.
+	// Only ever trust a primary+verified address from the emails endpoint: the
+	// public profile email (user.email) may be unverified or null, and the identity
+	// is linked to an account by email downstream, so an unverified value must never
+	// reach a member row.
 	var emails []struct {
 		Email    string `json:"email"`
 		Primary  bool   `json:"primary"`
 		Verified bool   `json:"verified"`
 	}
-	if err := getJSON(ctx, client, "https://api.github.com/user/emails", tok, &emails); err == nil {
-		for _, e := range emails {
-			if e.Primary && e.Verified {
-				email = e.Email
-				break
-			}
+	if err := getJSON(ctx, client, "https://api.github.com/user/emails", tok, &emails); err != nil {
+		return identity{}, fmt.Errorf("auth: github emails: %w", err)
+	}
+	email := ""
+	for _, e := range emails {
+		if e.Primary && e.Verified {
+			email = e.Email
+			break
 		}
 	}
 	if email == "" {
-		return identity{}, fmt.Errorf("auth: github: no verified email")
+		return identity{}, fmt.Errorf("auth: github: no verified primary email")
 	}
 	return identity{Subject: fmt.Sprintf("github:%d", user.ID), Email: email}, nil
 }

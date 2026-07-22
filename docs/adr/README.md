@@ -28,3 +28,4 @@ records keep their number and are marked here rather than deleted.
 | [0021](0021-diagnosis-engine.md) | Diagnosis engine on the endpoint detail page |
 | [0022](0022-relicense-server-mit.md) | Relicense the server to MIT (supersedes 0004) |
 | [0023](0023-in-app-documentation.md) | In-app documentation |
+| [0024](0024-one-verified-email-one-org.md) | One verified email maps to one org (account linking across providers) |

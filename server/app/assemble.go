@@ -134,14 +134,22 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 	// verified-org reader (both nil when auth is off), so a composing build mounts
 	// its own authenticated routes without importing the internal auth package.
 	var (
-		gate       func(http.Handler) http.Handler
-		sessionOrg func(*http.Request) (string, bool)
+		gate            func(http.Handler) http.Handler
+		sessionOrg      func(*http.Request) (string, bool)
+		sessionMemberID func(*http.Request) (string, bool)
 	)
 	if authLayer != nil {
 		gate = authLayer.Middleware
 		sessionOrg = auth.TenantFromContext
+		sessionMemberID = func(r *http.Request) (string, bool) {
+			s, ok := auth.FromContext(r.Context())
+			if !ok {
+				return "", false
+			}
+			return s.MemberID, true
+		}
 	}
-	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, webHandler.RenderShellPage, docsHandler.Render, log)
+	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, sessionMemberID, webHandler.RenderShellPage, docsHandler.Render, log)
 
 	// Background loops (extension jobs) share one context, cancelled on shutdown so
 	// every goroutine exits before the pool closes.
