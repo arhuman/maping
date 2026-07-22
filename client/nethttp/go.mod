@@ -3,8 +3,8 @@ module github.com/arhuman/maping/client/nethttp
 go 1.26.5
 
 require (
-	github.com/arhuman/maping/client v0.9.0
-	github.com/arhuman/maping/proto v0.9.0
+	github.com/arhuman/maping/client v0.10.0
+	github.com/arhuman/maping/proto v0.10.0
 	github.com/stretchr/testify v1.11.1
 )
 
