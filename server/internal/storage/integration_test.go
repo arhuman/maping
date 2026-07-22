@@ -750,6 +750,105 @@ func TestNoStatusReasonsForEndpointIntegration(t *testing.T) {
 // instance, the delta counters (cpu, gc pause) sum and the point-in-time gauges
 // (rss, heap, goroutines) take the window peak, ordered by instance and isolated
 // per tenant.
+// setupRollups (re)creates the 1m/1h/1d rollup tiers and their materialized views
+// from 0002 on top of a fresh raw summaries table, so a raw insert cascades into
+// the tiers Usage reads (1m for cardinality/requests, 1d for liveness). It drops
+// the tiers first because setupSchema drops and recreates raw summaries, which
+// leaves any pre-existing MV pointing at the old table.
+func setupRollups(t *testing.T, conn driver.Conn) {
+	t.Helper()
+	ctx := context.Background()
+	for _, mv := range []string{"summaries_1m_mv", "summaries_1h_mv", "summaries_1d_mv"} {
+		require.NoError(t, conn.Exec(ctx, "DROP VIEW IF EXISTS "+mv))
+	}
+	for _, tbl := range []string{"summaries_1m", "summaries_1h", "summaries_1d"} {
+		require.NoError(t, conn.Exec(ctx, "DROP TABLE IF EXISTS "+tbl))
+	}
+	ddl, err := os.ReadFile("migrations/clickhouse/0002_rollups.sql")
+	require.NoError(t, err)
+	for _, stmt := range splitStatements(string(ddl)) {
+		require.NoError(t, conn.Exec(ctx, stmt))
+	}
+}
+
+// TestUsageIntegration asserts the operator volumetry: distinct endpoints/series/
+// services/instances and the 30-day request total (from the 1m tier), liveness
+// (from the 1d tier), a positive disk estimate, tenant isolation, the zero value
+// for a never-ingested tenant, and the cross-tenant last-ingest map.
+func TestUsageIntegration(t *testing.T) {
+	conn := mustConn(t)
+	defer conn.Close()
+	setupSchema(t, conn)
+	setupRollups(t, conn)
+
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	w := newWriterWithConn(conn, Config{FlushInterval: 200 * time.Millisecond, FlushRows: 20}, log)
+
+	now := time.Now().UTC().Truncate(time.Minute)
+	tid := tenant.MustParse("usage-tenant")
+
+	// 3 distinct routes, 2 services, 2 instances, and 4 distinct
+	// (method, route, status_class) series; represented requests sum to 20.
+	series := []struct {
+		svc, inst, method, route, status string
+		count                            uint64
+	}{
+		{"svc1", "inst1", "GET", "/a", "STATUS_CLASS_2XX", 10},
+		{"svc1", "inst1", "GET", "/b", "STATUS_CLASS_2XX", 5},
+		{"svc1", "inst2", "GET", "/b", "STATUS_CLASS_5XX", 2},
+		{"svc2", "inst1", "POST", "/c", "STATUS_CLASS_2XX", 3},
+	}
+	for _, s := range series {
+		require.NoError(t, w.Enqueue(NewRow(
+			tid, s.svc, s.inst, s.method, s.route, s.status,
+			now, now.Add(5*time.Second), s.count, 0, 0, 0,
+			map[int32]uint64{10: s.count}, map[uint32]uint64{200: s.count},
+			"", "", "", "", time.Time{},
+			0, nil, nil, nil, 0,
+		)))
+	}
+	// A second tenant must not bleed into usage-tenant's figures.
+	require.NoError(t, w.Enqueue(NewRow(
+		tenant.MustParse("other-usage"), "svc", "inst", "GET", "/z", "STATUS_CLASS_2XX",
+		now, now.Add(5*time.Second), 999, 0, 0, 0,
+		map[int32]uint64{10: 999}, map[uint32]uint64{200: 999},
+		"", "", "", "", time.Time{},
+		0, nil, nil, nil, 0,
+	)))
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, w.Close(closeCtx))
+
+	// asOf is a minute past the rows so the raw disk window [asOf-7d, asOf) and the
+	// 30-day cardinality window both include them (PerformanceStats is [from, to)).
+	asOf := now.Add(time.Minute)
+	u, err := Usage(context.Background(), conn, tid, asOf)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), u.Endpoints, "distinct route_template")
+	require.Equal(t, uint64(4), u.Series, "distinct (method, route_template, status_class) — the guardrail key")
+	require.Equal(t, uint64(2), u.Services)
+	require.Equal(t, uint64(2), u.Instances)
+	require.Equal(t, uint64(20), u.Requests30d, "10+5+2+3, this tenant only")
+	require.Positive(t, u.DiskBytes, "disk estimate from system.parts or the fallback")
+	require.False(t, u.LastIngest.IsZero(), "a tenant that just ingested has a last-ingest")
+	require.False(t, u.FirstIngest.IsZero())
+
+	// A never-ingested tenant yields the zero value, not an error.
+	empty, err := Usage(context.Background(), conn, tenant.MustParse("ghost-tenant"), asOf)
+	require.NoError(t, err)
+	require.True(t, empty.LastIngest.IsZero(), "never-ingested tenant reports no last-ingest")
+	require.Zero(t, empty.Series)
+	require.Zero(t, empty.Requests30d)
+
+	// The cross-tenant map carries both live tenants.
+	m, err := LastIngestByTenant(context.Background(), conn)
+	require.NoError(t, err)
+	require.Contains(t, m, "usage-tenant")
+	require.Contains(t, m, "other-usage")
+	require.False(t, m["usage-tenant"].IsZero())
+}
+
 func TestInstanceResourcesForServiceIntegration(t *testing.T) {
 	conn := mustConn(t)
 	defer conn.Close()

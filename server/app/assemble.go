@@ -11,6 +11,7 @@ import (
 	"github.com/arhuman/maping/server/internal/auth"
 	"github.com/arhuman/maping/server/internal/control"
 	"github.com/arhuman/maping/server/internal/guardrail"
+	"github.com/arhuman/maping/server/internal/storage"
 	"github.com/arhuman/maping/server/internal/web"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -62,6 +63,7 @@ func resolveControlPlane(store *control.Store, o options, baseURL string, log *s
 // Every control-plane field is nil in static dev mode.
 type builtDeps struct {
 	querier       web.Querier
+	usage         *storage.QueryService // concrete read service for the operator usage seam
 	ingestHandler mapingv1connect.IngestServiceHandler
 	cp            controlPlane
 	memberStore   auth.MemberStore
@@ -149,7 +151,8 @@ func assembleMux(d builtDeps, o options, log *slog.Logger) (http.Handler, *atomi
 			return s.MemberID, true
 		}
 	}
-	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, sessionMemberID, webHandler.RenderShellPage, docsHandler.Render, log)
+	usage, lastIngest := buildUsageSeam(d.usage)
+	mountExtensions(mux, o.routes, d.pool, gate, sessionOrg, sessionMemberID, webHandler.RenderShellPage, docsHandler.Render, usage, lastIngest, log)
 
 	// Background loops (extension jobs) share one context, cancelled on shutdown so
 	// every goroutine exits before the pool closes.

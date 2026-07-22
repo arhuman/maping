@@ -128,8 +128,10 @@ func build(log *slog.Logger, opts ...Option) (*App, error) {
 		return nil, err
 	}
 
+	qs := writer.QueryService()
 	mux, ready, cancelBg, err := assembleMux(builtDeps{
-		querier:       scopedQuerier{qs: writer.QueryService()},
+		querier:       scopedQuerier{qs: qs},
+		usage:         qs,
 		ingestHandler: ingestHandler,
 		cp:            cpd.cp,
 		memberStore:   cpd.memberStore,

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -53,6 +54,17 @@ type RouteContext struct {
 	// docs.MarkdownToHTML. Unlike RenderShell the page is public (no auth chrome), so
 	// this is the seam for extension /doc/* pages. Always non-nil.
 	RenderDoc func(w http.ResponseWriter, r *http.Request, title string, body template.HTML)
+	// Usage returns the operator-facing volumetry for one tenant (liveness,
+	// cardinality, 30-day requests, estimated disk) so an operator console can render
+	// a per-account usage page without importing the internal storage layer. It is a
+	// cross-tenant capability guarded by the composing build's own operator check —
+	// the seam does no authorization. Always non-nil (ClickHouse is the data plane).
+	Usage func(ctx context.Context, tenantID string) (UsageStats, error)
+	// LastIngestByTenant returns the most recent ingest time per tenant in one scan,
+	// so an operator account list can flag live vs churned accounts without an N+1.
+	// Like Usage it is unauthorized here and gated by the composing build. Always
+	// non-nil.
+	LastIngestByTenant func(ctx context.Context) (map[string]time.Time, error)
 }
 
 // JobContext is what a WithBackgroundJob task receives. Ctx is cancelled at
@@ -204,9 +216,9 @@ func WithAccountLink(href string) Option {
 // core routes are mounted. pool is nil in static dev mode; gate and sessionOrg are
 // nil when auth is off, so a registrar needing authenticated routes checks them
 // and mounts nothing when absent.
-func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), sessionMemberID func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), renderDoc func(http.ResponseWriter, *http.Request, string, template.HTML), log *slog.Logger) {
+func mountExtensions(mux *http.ServeMux, routes []RouteRegistrar, pool *pgxpool.Pool, gate func(http.Handler) http.Handler, sessionOrg func(*http.Request) (string, bool), sessionMemberID func(*http.Request) (string, bool), renderShell func(http.ResponseWriter, *http.Request, string, template.HTML), renderDoc func(http.ResponseWriter, *http.Request, string, template.HTML), usage func(context.Context, string) (UsageStats, error), lastIngest func(context.Context) (map[string]time.Time, error), log *slog.Logger) {
 	for _, r := range routes {
-		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, SessionMemberID: sessionMemberID, RenderShell: renderShell, RenderDoc: renderDoc})
+		r(RouteContext{Mux: mux, Pool: pool, Log: log, Gate: gate, SessionOrg: sessionOrg, SessionMemberID: sessionMemberID, RenderShell: renderShell, RenderDoc: renderDoc, Usage: usage, LastIngestByTenant: lastIngest})
 	}
 	if len(routes) > 0 {
 		log.Info("extension routes mounted", slog.Int("count", len(routes)))

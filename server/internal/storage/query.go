@@ -212,6 +212,11 @@ func (q TenantQuery) PerformanceStats(
 	return PerformanceStats(ctx, q.s.conn, q.tenant, from, to)
 }
 
+// Usage forwards to the package-level operator volumetry for the bound tenant.
+func (q TenantQuery) Usage(ctx context.Context, now time.Time) (TenantUsage, error) {
+	return Usage(ctx, q.s.conn, q.tenant, now)
+}
+
 // InstanceResourcesForService forwards to the package-level per-instance USE
 // gauge breakdown for the bound tenant.
 func (q TenantQuery) InstanceResourcesForService(
