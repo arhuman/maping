@@ -22,9 +22,9 @@ func causeMemory(p diagnosisParams, win, base fleetResources) cause {
 	burst := p.Memory.Level == "Burst"
 	gcUp := win.gcCPU >= gcCPUElevated && isUp(win.gcCPU, base.gcCPU)
 	allocUp := isUp(win.allocRate, base.allocRate)
-	gcFreqUp := isUp(win.gcFreq, base.gcFreq)
+	gcAlloc := gcUp && allocUp
 
-	if !(leak || burst || (gcUp && allocUp)) {
+	if !leak && !burst && !gcAlloc {
 		return c
 	}
 	c.fired = true
@@ -32,24 +32,7 @@ func causeMemory(p diagnosisParams, win, base fleetResources) cause {
 		c.dotClass = "dot-err"
 	}
 
-	var ev []string
-	if leak || burst {
-		c.signals++
-		ev = append(ev, p.Memory.Evidence...)
-	}
-	if gcUp {
-		c.signals++
-		ev = append(ev, "GC CPU "+fmtPctD(win.gcCPU)+" vs "+fmtPctD(base.gcCPU)+" baseline.")
-	}
-	if allocUp {
-		c.signals++
-		ev = append(ev, "Alloc rate "+fmtBytes(win.allocRate)+"/s vs "+fmtBytes(base.allocRate)+"/s baseline.")
-	}
-	if gcFreqUp {
-		c.signals++
-		ev = append(ev, "GC frequency "+fmtRate(win.gcFreq)+"/s vs "+fmtRate(base.gcFreq)+"/s baseline.")
-	}
-	c.evidence = ev
+	c.evidence, c.signals = memoryEvidence(p, win, base, leak, burst, gcUp, allocUp)
 	c.chart = p.MemoryChart
 	c.falsifier = p.Memory.Falsifier
 	if c.falsifier == "" {
@@ -60,6 +43,31 @@ func causeMemory(p diagnosisParams, win, base fleetResources) cause {
 		c.mag += 3
 	}
 	return c
+}
+
+// memoryEvidence counts the corroborating memory signals and renders their
+// operator-facing lines: the memory verdict's own bullets (leak or burst), then
+// each resource delta that is up vs baseline (GC CPU, alloc rate, GC frequency).
+func memoryEvidence(p diagnosisParams, win, base fleetResources, leak, burst, gcUp, allocUp bool) ([]string, int) {
+	var ev []string
+	signals := 0
+	if leak || burst {
+		signals++
+		ev = append(ev, p.Memory.Evidence...)
+	}
+	if gcUp {
+		signals++
+		ev = append(ev, "GC CPU "+fmtPctD(win.gcCPU)+" vs "+fmtPctD(base.gcCPU)+" baseline.")
+	}
+	if allocUp {
+		signals++
+		ev = append(ev, "Alloc rate "+fmtBytes(win.allocRate)+"/s vs "+fmtBytes(base.allocRate)+"/s baseline.")
+	}
+	if isUp(win.gcFreq, base.gcFreq) {
+		signals++
+		ev = append(ev, "GC frequency "+fmtRate(win.gcFreq)+"/s vs "+fmtRate(base.gcFreq)+"/s baseline.")
+	}
+	return ev, signals
 }
 
 // causeCPU fires when the fleet's cores-used approaches its GOMAXPROCS budget —
@@ -94,13 +102,13 @@ func causeCongestion(win, base fleetResources, ds downstreamView) cause {
 	selfDominant := !ds.HasData || ds.DownFraction <= (1-selfDominantShare)
 	cpuFlat := !isUp(win.cores, base.cores)
 	gcFlat := !isUp(win.gcCPU, base.gcCPU)
-	if !(selfDominant && cpuFlat && gcFlat) {
+	if !selfDominant || !cpuFlat || !gcFlat {
 		return c
 	}
 	inflightUp := isUp(float64(win.inFlight), float64(base.inFlight))
 	fdNear := win.fdLimit > 0 && float64(win.openFDs)/float64(win.fdLimit) >= fdNearLimit
 	fdUp := isUp(float64(win.openFDs), float64(base.openFDs))
-	if !(inflightUp || fdNear || fdUp) {
+	if !inflightUp && !fdNear && !fdUp {
 		return c
 	}
 
@@ -109,6 +117,15 @@ func causeCongestion(win, base fleetResources, ds downstreamView) cause {
 	c.evidence = []string{
 		"Self-time dominates (downstream " + fmtPctD(ds.DownFraction) + ") while CPU and GC held flat vs baseline — blocked, not busy.",
 	}
+	addCongestionSignals(&c, win, base, inflightUp, fdNear, fdUp)
+	c.falsifier = "Not congestion if cores-used or GC CPU climbs with the latency — that points back to compute or memory."
+	return c
+}
+
+// addCongestionSignals appends the in-flight and file-descriptor corroborators to
+// a fired congestion cause, bumping its signal count and carrying the strongest
+// FD-utilization ratio as the magnitude.
+func addCongestionSignals(c *cause, win, base fleetResources, inflightUp, fdNear, fdUp bool) {
 	if inflightUp {
 		c.signals++
 		c.mag = float64(win.inFlight) / float64(base.inFlight)
@@ -116,17 +133,19 @@ func causeCongestion(win, base fleetResources, ds downstreamView) cause {
 	}
 	if fdNear || fdUp {
 		c.signals++
-		if win.fdLimit > 0 {
-			c.evidence = append(c.evidence, "Open FDs peaked "+strconv.FormatUint(win.openFDs, 10)+" of "+strconv.FormatUint(win.fdLimit, 10)+" limit.")
-		} else {
-			c.evidence = append(c.evidence, "Open FDs peaked "+strconv.FormatUint(win.openFDs, 10)+" (up vs baseline).")
-		}
+		c.evidence = append(c.evidence, fdEvidence(win))
 		if r := float64(win.openFDs) / float64(win.fdLimit); win.fdLimit > 0 && r > c.mag {
 			c.mag = r
 		}
 	}
-	c.falsifier = "Not congestion if cores-used or GC CPU climbs with the latency — that points back to compute or memory."
-	return c
+}
+
+// fdEvidence renders the open-FD peak line, showing the limit when one is known.
+func fdEvidence(win fleetResources) string {
+	if win.fdLimit > 0 {
+		return "Open FDs peaked " + strconv.FormatUint(win.openFDs, 10) + " of " + strconv.FormatUint(win.fdLimit, 10) + " limit."
+	}
+	return "Open FDs peaked " + strconv.FormatUint(win.openFDs, 10) + " (up vs baseline)."
 }
 
 // causeOverload fires when context-deadline/cancel aborts are an elevated share of
@@ -237,12 +256,10 @@ func causeInstanceLocalized(instances []instanceStatRow) cause {
 	return c
 }
 
-// causeRelease fires when one deploy_version carries a materially worse p95 than
-// the best-performing version over the window — a release regression, attributable
-// by rolling back rather than debugging the running code.
-func causeRelease(versions []storage.VersionStat) cause {
-	c := cause{name: "Release regression", dotClass: "dot-warn", maxSignals: 2}
-	var best, worst storage.VersionStat
+// bestWorstVersion scans versions with enough samples for the fastest and slowest
+// p95. It reports ok=false unless two distinct qualifying versions were found, so a
+// single release (or none) never registers as a regression.
+func bestWorstVersion(versions []storage.VersionStat) (best, worst storage.VersionStat, ok bool) {
 	haveBest, haveWorst := false, false
 	for _, v := range versions {
 		if v.Version == "" || v.Count < minVersionSamples || v.P95 <= 0 {
@@ -255,7 +272,16 @@ func causeRelease(versions []storage.VersionStat) cause {
 			worst, haveWorst = v, true
 		}
 	}
-	if !haveBest || !haveWorst || best.Version == worst.Version {
+	return best, worst, haveBest && haveWorst && best.Version != worst.Version
+}
+
+// causeRelease fires when one deploy_version carries a materially worse p95 than
+// the best-performing version over the window — a release regression, attributable
+// by rolling back rather than debugging the running code.
+func causeRelease(versions []storage.VersionStat) cause {
+	c := cause{name: "Release regression", dotClass: "dot-warn", maxSignals: 2}
+	best, worst, ok := bestWorstVersion(versions)
+	if !ok {
 		return c
 	}
 	ratio := worst.P95 / best.P95

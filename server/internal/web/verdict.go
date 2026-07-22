@@ -35,6 +35,18 @@ const (
 	sevCritical
 )
 
+// maxSeverity returns the strongest severity among its arguments — the endpoint
+// verdict level is the max across the error, spread, and latency components.
+func maxSeverity(sevs ...severity) severity {
+	m := sevNone
+	for _, s := range sevs {
+		if s > m {
+			m = s
+		}
+	}
+	return m
+}
+
 // Latency floors (percentiles are in seconds throughout the detail view): 100ms,
 // 200ms and 800ms as fractions of a second.
 const (
@@ -92,13 +104,7 @@ func computeVerdict(d detailView, baseline []storage.TimePoint, winSeconds float
 		}
 	}
 
-	level := errSev
-	if spreadSev > level {
-		level = spreadSev
-	}
-	if latSev > level {
-		level = latSev
-	}
+	level := maxSeverity(errSev, spreadSev, latSev)
 
 	// Blast-radius qualifier: a broken but near-idle endpoint is not a live incident.
 	qualifier := ""
@@ -132,7 +138,7 @@ func computeVerdict(d detailView, baseline []storage.TimePoint, winSeconds float
 		DotClass:  dot,
 		Headline:  name,
 		Qualifier: qualifier,
-		Sentence:  problemSentence(d, errors, spread, latRatio, errSev, spreadSev, latSev),
+		Sentence:  problemSentence(d, spread, latRatio, errSev, spreadSev, latSev),
 		Open:      true,
 	}
 }
@@ -222,7 +228,7 @@ func healthySentence(d detailView, spread float64) string {
 // problemSentence composes the Degraded/Critical line from the components that
 // actually fired, strongest severity first (latency, error, spread breaking
 // ties), each phrased factually with the shared latency/percentage formatters.
-func problemSentence(d detailView, errors int, spread, latRatio float64, errSev, spreadSev, latSev severity) string {
+func problemSentence(d detailView, spread, latRatio float64, errSev, spreadSev, latSev severity) string {
 	type reason struct {
 		sev  severity
 		rank int
