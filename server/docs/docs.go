@@ -91,7 +91,7 @@ func NewHandler(extra []Section, header template.HTML, log *slog.Logger) *Handle
 
 // Register mounts the doc routes on the public mux. /doc/{topic} is the core
 // content; a composing build's own pages mount on more specific patterns
-// (/doc/billing) that take ServeMux precedence over the {topic} wildcard.
+// (/doc/sso) that take ServeMux precedence over the {topic} wildcard.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /doc", h.index)
 	mux.HandleFunc("GET /doc/{topic}", h.topic)

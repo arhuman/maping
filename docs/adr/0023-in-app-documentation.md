@@ -72,7 +72,7 @@ core repo and must exist in every build, not only behind the commercial binary.
   the community build and the enterprise binary alike, since both render the same
   core dashboard chrome.
 - **Routing.** `/doc` and `/doc/{topic}` mount on the outer (unauthenticated) mux
-  like `/login`. Extension pages mount on more specific patterns (`/doc/billing`),
+  like `/login`. Extension pages mount on more specific patterns (`/doc/sso`),
   which take Go 1.22 ServeMux precedence over the `{topic}` wildcard; an unknown
   core slug is a 404, never a blank shell.
 

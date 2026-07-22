@@ -51,36 +51,36 @@ func TestUnknownTopicIs404(t *testing.T) {
 }
 
 func TestInjectedSectionAppearsInRail(t *testing.T) {
-	_, mux := testHandler(Section{Group: "Enterprise", Title: "Billing", Href: "/doc/billing", Order: 1})
+	_, mux := testHandler(Section{Group: "Enterprise", Title: "SSO", Href: "/doc/sso", Order: 1})
 	rec := get(t, mux, "/doc")
 	body := rec.Body.String()
 	assert.Contains(t, body, "Enterprise", "injected group heading must render")
-	assert.Contains(t, body, `href="/doc/billing"`)
+	assert.Contains(t, body, `href="/doc/sso"`)
 	// The core group must still precede the injected one (first-seen group order).
 	assert.Less(t, strings.Index(body, "Product"), strings.Index(body, "Enterprise"))
 }
 
 func TestRenderWrapsArbitraryBodyWithSharedNav(t *testing.T) {
-	h, _ := testHandler(Section{Group: "Enterprise", Title: "Billing", Href: "/doc/billing", Order: 1})
+	h, _ := testHandler(Section{Group: "Enterprise", Title: "SSO", Href: "/doc/sso", Order: 1})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/doc/billing", nil)
-	body, err := MarkdownToHTML([]byte("# Billing\n\nHow billing works."))
+	req := httptest.NewRequest(http.MethodGet, "/doc/sso", nil)
+	body, err := MarkdownToHTML([]byte("# SSO\n\nHow SSO works."))
 	require.NoError(t, err)
-	h.Render(rec, req, "Billing", body)
+	h.Render(rec, req, "SSO", body)
 	out := rec.Body.String()
-	assert.Contains(t, out, "How billing works.", "extension body must be embedded")
+	assert.Contains(t, out, "How SSO works.", "extension body must be embedded")
 	assert.Contains(t, out, "Quickstart", "shared core TOC must still render on an extension page")
 	// The active link for the current path is lit.
-	assert.Contains(t, out, `class="lnk on" href="/doc/billing"`)
+	assert.Contains(t, out, `class="lnk on" href="/doc/sso"`)
 }
 
 func TestInjectedHeaderReplacesBuiltInBar(t *testing.T) {
-	h := NewHandler(nil, `<header id="site-header"><a href="/pricing">Pricing</a></header>`, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := NewHandler(nil, `<header id="site-header"><a href="/features">Features</a></header>`, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	mux := http.NewServeMux()
 	h.Register(mux)
 	body := get(t, mux, "/doc").Body.String()
 	assert.Contains(t, body, `id="site-header"`, "the injected site header must render")
-	assert.Contains(t, body, `href="/pricing"`)
+	assert.Contains(t, body, `href="/features"`)
 	assert.NotContains(t, body, `class="topbar"`, "the minimal built-in bar is replaced when a header is injected")
 }
 
@@ -91,11 +91,11 @@ func TestCommunityBuildFallsBackToHomeBrand(t *testing.T) {
 	body := get(t, mux, "/doc").Body.String()
 	assert.Contains(t, body, `class="topbar"`)
 	assert.Contains(t, body, `class="b" href="/"`)
-	assert.NotContains(t, body, `/pricing`)
+	assert.NotContains(t, body, `/features`)
 }
 
 func TestRenderInAppWhenAuthenticated(t *testing.T) {
-	h, mux := testHandler(Section{Group: "Enterprise", Title: "Billing", Href: "/doc/billing", Order: 1})
+	h, mux := testHandler(Section{Group: "Enterprise", Title: "SSO", Href: "/doc/sso", Order: 1})
 	var gotTitle string
 	var gotContent template.HTML
 	h.EnableInApp(
@@ -113,7 +113,7 @@ func TestRenderInAppWhenAuthenticated(t *testing.T) {
 	assert.NotContains(t, frag, `class="topbar"`, "no standalone chrome in the fragment")
 	assert.Contains(t, frag, `class="doc-lnk on" href="/doc/quickstart"`, "active TOC link lit")
 	assert.Contains(t, frag, `href="/doc/architecture"`, "core TOC present in the fragment")
-	assert.Contains(t, frag, `href="/doc/billing"`, "injected sections share the in-app TOC too")
+	assert.Contains(t, frag, `href="/doc/sso"`, "injected sections share the in-app TOC too")
 }
 
 func TestRenderStandaloneWhenAnonymous(t *testing.T) {
