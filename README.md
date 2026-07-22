@@ -5,15 +5,15 @@
 Open source. Start free on the [hosted service](https://www.mapi-ng.com) (no card), or self-host the complete MIT stack.
 
 mAPI-ng answers one question: my endpoint got slower or started failing, what is the most
-likely cause, and what should I check next? It correlates RED with Go runtime, per-instance,
-deployment, and downstream signals as a pure function over data the page already loads, then
-ranks the likely causes and shows the evidence behind each. Every cause carries a
+likely cause, and what should I check next? It correlates RED metrics with Go runtime,
+instance, deployment, and downstream signals, then ranks the most plausible causes and shows
+the evidence behind each. Every cause carries a
 "Rules this out:" line so you can falsify it, and when nothing explains the anomaly it says
 "Unattributed" rather than inventing a cause.
 
 Instrument in a few lines: two imports, construct a recorder, add one middleware, set one env
-var. An absent key makes the middleware a no-op, so adding mAPI-ng is always safe and
-activation is decoupled from the code change.
+var. An absent key keeps the middleware inactive and prevents data transmission, so
+instrumentation can be merged independently from activation.
 
 ![Endpoint-detail diagnosis card: "Memory / GC pressure, High (3/4 signals)" ranking a
 worsening memory leak from correlated evidence (post-GC heap climbing 3.4x, allocation rate
@@ -37,8 +37,8 @@ Grafana, or YAML to operate.
 
 **Efficiency.** The client aggregates per-endpoint metrics in-process into a
 DDSketch before sending. The server stores compact Summaries in ClickHouse and rolls them up
-through 1-minute, 1-hour, and 1-day tiers. More data per second ingested, less disk used,
-faster queries than raw-event pipelines.
+through 1-minute, 1-hour, and 1-day tiers. In-process aggregation reduces transmitted, stored,
+and queried data compared with raw-event collection.
 
 ---
 
@@ -50,48 +50,6 @@ or custom dashboards. It gives you RED metrics (rate, errors, duration) and a ra
 evidence-backed diagnosis for every Go HTTP endpoint, from a few lines of instrumentation.
 
 For the full product framing, design decisions, and terminology, see [`docs/context.md`](docs/context.md).
-
----
-
-## Repo layout
-
-```
-mAPI-ng/
-  client/          Go module: github.com/arhuman/maping/client      (MIT)
-    gin/           Go module: github.com/arhuman/maping/client/gin  (MIT, Gin adapter)
-  server/          Go module: github.com/arhuman/maping/server      (MIT)
-    cmd/maping-server/
-    internal/
-  proto/           Go module: github.com/arhuman/maping/proto       (MIT, shared protobuf)
-  example/         Go module: github.com/arhuman/maping/example     (MIT, runnable quickstart)
-  Dockerfile       maping-server image (Go workspace build)
-  docker-compose*.yml  neutral base + local/prod overlays
-  env.sample       template for .env (make local / make up read it)
-  LICENSE          MIT license (applies to the whole repository)
-  docs/context.md  Product framing, design decisions, terminology
-  docs/adr/        Architecture Decision Records
-  go.work          Workspace tying proto, client, client/gin, server, and example together
-```
-
-The repository is an **open-source, multi-module** project: every module (`proto`, `client`,
-the framework adapters, and `server`) is **MIT** (auditable, safe to import into production hot
-paths, free to self-host and modify). Keeping the Gin adapter in a separate module means importing
-the core client never pulls Gin into your binary.
-
-The modules are wired together for local development by `go.work`, so build and test from the
-repo root (or anywhere inside the tree). The workspace resolves cross-module imports from
-source. Published tags are cut with `make release VERSION=vX.Y.Z`, which pins each module to
-the real released versions of its siblings (no local `replace` directives leak to consumers).
-
----
-
-## Documentation
-
-User-facing documentation (quickstart, what data is collected, runtime overhead, failure
-and retry behaviour, security and data flow, self-hosting, architecture, benchmarks, and
-licensing) lives in [`server/docs/content/`](server/docs/content/) and is served by the
-running server at **`/doc`** (public, no configuration, community build included). Deeper
-design rationale lives in the [Architecture Decision Records](docs/adr/).
 
 ---
 
@@ -144,16 +102,6 @@ export MAPING_KEY=your-ingest-key   # the only required input; absent = no-op
 
 ---
 
-## Architecture Decision Records
-
-Design decisions are recorded one file per decision under [`docs/adr/`](docs/adr/); see the
-[ADR index](docs/adr/README.md) for the full list, including the diagnosis engine
-([0021](docs/adr/0021-diagnosis-engine.md)) and the MIT relicense
-([0022](docs/adr/0022-relicense-server-mit.md)).
-
-
----
-
 ## Hosted or self-hosted
 
 Everything in this repository is MIT and runs on your own infrastructure with `make local`
@@ -164,6 +112,57 @@ If you would rather not operate ClickHouse and Postgres yourself,
 tier and no card required. Your instrumentation is byte-for-byte identical either way (only
 `MAPING_KEY` changes), so you can start hosted and move to self-hosting later, or the reverse,
 at any time. Convenience, not lock-in.
+
+---
+
+## Repo layout
+
+```
+mAPI-ng/
+  client/          Go module: github.com/arhuman/maping/client      (MIT)
+    gin/           Go module: github.com/arhuman/maping/client/gin  (MIT, Gin adapter)
+  server/          Go module: github.com/arhuman/maping/server      (MIT)
+    cmd/maping-server/
+    internal/
+  proto/           Go module: github.com/arhuman/maping/proto       (MIT, shared protobuf)
+  example/         Go module: github.com/arhuman/maping/example     (MIT, runnable quickstart)
+  Dockerfile       maping-server image (Go workspace build)
+  docker-compose*.yml  neutral base + local/prod overlays
+  env.sample       template for .env (make local / make up read it)
+  LICENSE          MIT license (applies to the whole repository)
+  docs/context.md  Product framing, design decisions, terminology
+  docs/adr/        Architecture Decision Records
+  go.work          Workspace tying proto, client, client/gin, server, and example together
+```
+
+The repository is an **open-source, multi-module** project: every module (`proto`, `client`,
+the framework adapters, and `server`) is **MIT** (auditable, safe to import into production hot
+paths, free to self-host and modify). Keeping the Gin adapter in a separate module means importing
+the core client never pulls Gin into your binary.
+
+The modules are wired together for local development by `go.work`, so build and test from the
+repo root (or anywhere inside the tree). The workspace resolves cross-module imports from
+source. Published tags are cut with `make release VERSION=vX.Y.Z`, which pins each module to
+the real released versions of its siblings (no local `replace` directives leak to consumers).
+
+---
+
+## Documentation
+
+User-facing documentation (quickstart, what data is collected, runtime overhead, failure
+and retry behaviour, security and data flow, self-hosting, architecture, benchmarks, and
+licensing) lives in [`server/docs/content/`](server/docs/content/) and is served by the
+running server at **`/doc`** (public, no configuration, community build included). Deeper
+design rationale lives in the [Architecture Decision Records](docs/adr/).
+
+---
+
+## Architecture Decision Records
+
+Design decisions are recorded one file per decision under [`docs/adr/`](docs/adr/); see the
+[ADR index](docs/adr/README.md) for the full list, including the diagnosis engine
+([0021](docs/adr/0021-diagnosis-engine.md)) and the MIT relicense
+([0022](docs/adr/0022-relicense-server-mit.md)).
 
 ---
 
@@ -179,10 +178,6 @@ for why the server moved from BSL 1.1 to MIT.
 ---
 
 ## Development
-
-This repository is a [Go workspace](https://go.dev/doc/tutorial/workspaces), which means you can work on all modules (`proto`, `client`, `server`, etc.) simultaneously. The `go.work` file at the root handles the build.
-
-To get started, you only need to run `make local` to stand up the full development stack (server, ClickHouse, Postgres).
 
 Key `Makefile` targets for contributors:
 - `make test`: Run all tests.
