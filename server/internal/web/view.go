@@ -20,14 +20,15 @@ const errorRateWarn = 0.05
 
 // serviceRow is one rendered row of the service-overview table.
 type serviceRow struct {
-	Service    string
-	Count      uint64
-	RatePerSec float64
-	ErrorRate  float64
-	ErrorHigh  bool
-	P50        float64
-	P95        float64
-	P99        float64
+	Service       string
+	Count         uint64
+	RatePerSec    float64
+	ErrorRate     float64
+	ErrorHigh     bool
+	Client4xxRate float64
+	P50           float64
+	P95           float64
+	P99           float64
 	// DrillHref is the overview→endpoints link. It carries ?sort=error when the
 	// service is unhealthy (warn/err) so the operator lands already triaged on
 	// the worst endpoints; a healthy service drills to the default traffic sort.
@@ -38,17 +39,18 @@ type serviceRow struct {
 // RespBytesAvg are the per-request average payload sizes (bytes) for the
 // bytes-symmetry columns.
 type endpointRow struct {
-	Method       string
-	Route        string
-	Count        uint64
-	RatePerSec   float64
-	ErrorRate    float64
-	ErrorHigh    bool
-	P50          float64
-	P95          float64
-	P99          float64
-	ReqBytesAvg  float64
-	RespBytesAvg float64
+	Method        string
+	Route         string
+	Count         uint64
+	RatePerSec    float64
+	ErrorRate     float64
+	ErrorHigh     bool
+	Client4xxRate float64
+	P50           float64
+	P95           float64
+	P99           float64
+	ReqBytesAvg   float64
+	RespBytesAvg  float64
 }
 
 // ratePerSec derives the request rate from an aggregate count over the window.
@@ -74,15 +76,16 @@ func toServiceRows(stats []storage.ServiceStat, w time.Duration, winKey string) 
 		}
 		href = withWin(href, winKey)
 		out = append(out, serviceRow{
-			Service:    s.Service,
-			Count:      s.Count,
-			RatePerSec: ratePerSec(s.Count, w),
-			ErrorRate:  s.ErrorRate,
-			ErrorHigh:  s.ErrorRate >= errorRateWarn,
-			P50:        s.P50,
-			P95:        s.P95,
-			P99:        s.P99,
-			DrillHref:  href,
+			Service:       s.Service,
+			Count:         s.Count,
+			RatePerSec:    ratePerSec(s.Count, w),
+			ErrorRate:     s.ErrorRate,
+			ErrorHigh:     s.ErrorRate >= errorRateWarn,
+			Client4xxRate: s.Client4xxRate,
+			P50:           s.P50,
+			P95:           s.P95,
+			P99:           s.P99,
+			DrillHref:     href,
 		})
 	}
 	return out
@@ -93,17 +96,18 @@ func toEndpointRows(stats []storage.EndpointStat, w time.Duration) []endpointRow
 	out := make([]endpointRow, 0, len(stats))
 	for _, e := range stats {
 		out = append(out, endpointRow{
-			Method:       e.Method,
-			Route:        e.Route,
-			Count:        e.Count,
-			RatePerSec:   ratePerSec(e.Count, w),
-			ErrorRate:    e.ErrorRate,
-			ErrorHigh:    e.ErrorRate >= errorRateWarn,
-			P50:          e.P50,
-			P95:          e.P95,
-			P99:          e.P99,
-			ReqBytesAvg:  e.ReqBytesAvg,
-			RespBytesAvg: e.RespBytesAvg,
+			Method:        e.Method,
+			Route:         e.Route,
+			Count:         e.Count,
+			RatePerSec:    ratePerSec(e.Count, w),
+			ErrorRate:     e.ErrorRate,
+			ErrorHigh:     e.ErrorRate >= errorRateWarn,
+			Client4xxRate: e.Client4xxRate,
+			P50:           e.P50,
+			P95:           e.P95,
+			P99:           e.P99,
+			ReqBytesAvg:   e.ReqBytesAvg,
+			RespBytesAvg:  e.RespBytesAvg,
 		})
 	}
 	return out

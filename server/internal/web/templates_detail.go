@@ -32,7 +32,7 @@ const tplDetailHTML = `
     </div>
     <div class="panel" style="padding:18px 20px;">
       <div style="font-size:13.5px;font-weight:700;margin-bottom:6px;">Status breakdown</div>
-      <div style="font:500 11px var(--mono);color:var(--txt-3);margin-bottom:16px;">error = 4xx + 5xx + timeout</div>
+      <div style="font:500 11px var(--mono);color:var(--txt-3);margin-bottom:16px;">error = 5xx + timeout · 4xx shown separately</div>
       {{range .StatusBars}}
       <div style="margin-bottom:13px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">

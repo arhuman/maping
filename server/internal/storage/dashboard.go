@@ -17,20 +17,21 @@ import (
 // (service, or endpoint) so each row is one table row in the dashboard. They
 // reuse the exact frozen sumMap + percentile technique of seriesQueryTemplate:
 // merge every summary's sketch with sumMap, walk the cumulative counts, and read
-// value(i) = 2*pow(1.01,i)/2.01 seconds. The error rate stays the CONTEXT
-// convention: (4xx + 5xx + no_status) / total. The FROM table is only ever a
-// selectTier member, re-validated against tierTables before formatting — never
-// an attacker-controlled name.
+// value(i) = 2*pow(1.01,i)/2.01 seconds. The error rate is server failures only,
+// (5xx + no_status) / total (ADR-0026); the 4xx client-error rate is a separate
+// column. The FROM table is only ever a selectTier member, re-validated against
+// tierTables before formatting, never an attacker-controlled name.
 
 // ServiceStat is one row of the service-overview level: aggregate RED metrics
 // for a whole service over the query window. ErrorRate is a fraction in [0,1].
 type ServiceStat struct {
-	Service   string
-	Count     uint64
-	ErrorRate float64
-	P50       float64
-	P95       float64
-	P99       float64
+	Service       string
+	Count         uint64
+	ErrorRate     float64
+	Client4xxRate float64
+	P50           float64
+	P95           float64
+	P99           float64
 }
 
 // EndpointStat is one row of the endpoint-table level: aggregate RED metrics
@@ -39,15 +40,16 @@ type ServiceStat struct {
 // (sum(req_bytes)/sum(count), sum(resp_bytes)/sum(count)) for the bytes-symmetry
 // view; they are appended so existing scanners and callers stay valid.
 type EndpointStat struct {
-	Method       string
-	Route        string
-	Count        uint64
-	ErrorRate    float64
-	P50          float64
-	P95          float64
-	P99          float64
-	ReqBytesAvg  float64
-	RespBytesAvg float64
+	Method        string
+	Route         string
+	Count         uint64
+	ErrorRate     float64
+	Client4xxRate float64
+	P50           float64
+	P95           float64
+	P99           float64
+	ReqBytesAvg   float64
+	RespBytesAvg  float64
 }
 
 // HistogramBar is one bar of the latency histogram: the bucket's latency value
@@ -102,11 +104,13 @@ WITH
     arrayMap(k -> merged[k], ks) AS vs,
     arrayCumSum(vs) AS cs,
     sum(count) AS total_count,
-    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
+    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count,
+    sumIf(count, status_class = 'STATUS_CLASS_4XX') AS client_count
 SELECT
     service,
     total_count AS cnt,
     if(total_count = 0, 0, error_count / total_count) AS error_rate,
+    if(total_count = 0, 0, client_count / total_count) AS client_4xx_rate,
     ` + percentileExpr("0.50") + ` AS p50,
     ` + percentileExpr("0.95") + ` AS p95,
     ` + percentileExpr("0.99") + ` AS p99
@@ -127,12 +131,14 @@ WITH
     arrayMap(k -> merged[k], ks) AS vs,
     arrayCumSum(vs) AS cs,
     sum(count) AS total_count,
-    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
+    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count,
+    sumIf(count, status_class = 'STATUS_CLASS_4XX') AS client_count
 SELECT
     method,
     route_template,
     total_count AS cnt,
     if(total_count = 0, 0, error_count / total_count) AS error_rate,
+    if(total_count = 0, 0, client_count / total_count) AS client_4xx_rate,
     ` + percentileExpr("0.50") + ` AS p50,
     ` + percentileExpr("0.95") + ` AS p95,
     ` + percentileExpr("0.99") + ` AS p99,
@@ -224,7 +230,7 @@ func Services(
 	defer rows.Close()
 
 	return scanRows(rows, "Services", func(s *ServiceStat) []any {
-		return []any{&s.Service, &s.Count, &s.ErrorRate, &s.P50, &s.P95, &s.P99}
+		return []any{&s.Service, &s.Count, &s.ErrorRate, &s.Client4xxRate, &s.P50, &s.P95, &s.P99}
 	})
 }
 
@@ -248,7 +254,7 @@ func Endpoints(
 	defer rows.Close()
 
 	return scanRows(rows, "Endpoints", func(e *EndpointStat) []any {
-		return []any{&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.P50, &e.P95, &e.P99, &e.ReqBytesAvg, &e.RespBytesAvg}
+		return []any{&e.Method, &e.Route, &e.Count, &e.ErrorRate, &e.Client4xxRate, &e.P50, &e.P95, &e.P99, &e.ReqBytesAvg, &e.RespBytesAvg}
 	})
 }
 
