@@ -29,3 +29,5 @@ records keep their number and are marked here rather than deleted.
 | [0022](0022-relicense-server-mit.md) | Relicense the server to MIT (supersedes 0004) |
 | [0023](0023-in-app-documentation.md) | In-app documentation |
 | [0024](0024-one-verified-email-one-org.md) | One verified email maps to one org (account linking across providers) |
+| [0025](0025-operator-usage-seam.md) | Operator usage seam: cross-tenant volumetry through the composition seam |
+| [0026](0026-error-rate-server-failures-only.md) | RED error rate counts server failures only (5xx + NO_STATUS) |
