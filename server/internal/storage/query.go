@@ -51,7 +51,7 @@ WITH
     arrayMap(k -> merged[k], ks) AS vs,
     arrayCumSum(vs) AS cs,
     sum(count) AS total_count,
-    sumIf(count, status_class IN ('STATUS_CLASS_4XX', 'STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
+    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
 SELECT
     bucket AS ts,
     total_count AS cnt,

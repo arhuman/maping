@@ -102,7 +102,7 @@ WITH
     arrayMap(k -> merged[k], ks) AS vs,
     arrayCumSum(vs) AS cs,
     sum(count) AS total_count,
-    sumIf(count, status_class IN ('STATUS_CLASS_4XX', 'STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
+    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
 SELECT
     service,
     total_count AS cnt,
@@ -127,7 +127,7 @@ WITH
     arrayMap(k -> merged[k], ks) AS vs,
     arrayCumSum(vs) AS cs,
     sum(count) AS total_count,
-    sumIf(count, status_class IN ('STATUS_CLASS_4XX', 'STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
+    sumIf(count, status_class IN ('STATUS_CLASS_5XX', 'STATUS_CLASS_NO_STATUS')) AS error_count
 SELECT
     method,
     route_template,
@@ -343,9 +343,11 @@ func buildEndpointDetail(
 		{Class: "no_status", Count: cno},
 	}
 
-	// Error rate = (4xx + 5xx + no_status) / total, the CONTEXT convention.
+	// Error rate = (5xx + no_status) / total: server failures only. 4xx (client
+	// errors) are shown in StatusClasses above but excluded from the failure rate
+	// (ADR-0026); c4xx feeds only the per-class breakdown now.
 	if total > 0 {
-		d.ErrorRate = float64(c4xx+c5xx+cno) / float64(total)
+		d.ErrorRate = float64(c5xx+cno) / float64(total)
 	}
 
 	// Exact status-code map.

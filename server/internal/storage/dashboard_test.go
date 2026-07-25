@@ -13,7 +13,9 @@ import (
 // oracle over the same merged sketch.
 func TestBuildEndpointDetail(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
-		// total = 2 + 1 + 3 + 4 + 0 = 10; errors = 4xx+5xx+no_status = 3+4+0 = 7.
+		// total = 2 + 1 + 3 + 4 + 0 = 10; errors = 5xx+no_status = 4+0 = 4. The 3
+		// 4xx (client errors) are shown in StatusClasses but excluded from the
+		// failure rate (ADR-0026).
 		ks := []int32{10, 20, 30}
 		vs := []uint64{1, 2, 7} // sketch total = 10, matches request total.
 		codeKeys := []uint32{200, 404, 500}
@@ -22,7 +24,7 @@ func TestBuildEndpointDetail(t *testing.T) {
 		d := buildEndpointDetail(10, 2, 1, 3, 4, 0, ks, vs, codeKeys, codeVals)
 
 		require.Equal(t, uint64(10), d.Count)
-		assert.InDelta(t, 7.0/10.0, d.ErrorRate, 1e-9)
+		assert.InDelta(t, 4.0/10.0, d.ErrorRate, 1e-9)
 
 		// Histogram bars map index -> value(i) seconds and keep counts aligned.
 		require.Len(t, d.Histogram, 3)
