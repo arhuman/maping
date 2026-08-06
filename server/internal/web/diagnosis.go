@@ -31,9 +31,13 @@ type topCauseView struct {
 	Name       string
 	DotClass   string
 	Confidence string // e.g. "High (3/3 signals)"
-	Evidence   []string
-	Falsifier  string
-	Chart      template.HTML
+	// Summary is the one-line plain-English interpretation of the cause, shown
+	// above the technical evidence for readers without an SRE background. It
+	// never replaces the evidence bullets, it only precedes them.
+	Summary   string
+	Evidence  []string
+	Falsifier string
+	Chart     template.HTML
 }
 
 // causeSummary is one of the other fired causes, shown compactly below the top
@@ -179,9 +183,13 @@ type cause struct {
 	signals    int
 	maxSignals int
 	mag        float64 // magnitude, for ranking ties within a signal count
-	evidence   []string
-	falsifier  string
-	chart      template.HTML
+	// summary is the one-line plain-English interpretation of this cause, shown
+	// above the technical evidence for readers without an SRE background. It
+	// never replaces the evidence bullets, it only precedes them.
+	summary   string
+	evidence  []string
+	falsifier string
+	chart     template.HTML
 }
 
 // score keeps signal count dominant (more corroboration ranks higher) and uses
@@ -244,6 +252,7 @@ func computeDiagnosis(p diagnosisParams) diagnosisView {
 				Name:       "Unattributed",
 				DotClass:   "dot-muted",
 				Confidence: "Low (0 signals)",
+				Summary:    "None of the tracked signals stand out enough to point at a specific cause yet.",
 				Evidence:   []string{"No resource signal explains this degradation — check the timeline and exemplars."},
 				Falsifier:  "A cause would attach if a resource, downstream, version, or instance signal crossed its threshold next window.",
 			},
@@ -259,6 +268,7 @@ func computeDiagnosis(p diagnosisParams) diagnosisView {
 			Name:       top.name,
 			DotClass:   top.dotClass,
 			Confidence: confidenceLabel(top.signals, top.maxSignals),
+			Summary:    top.summary,
 			Evidence:   top.evidence,
 			Falsifier:  top.falsifier,
 			Chart:      top.chart,

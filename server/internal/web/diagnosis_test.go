@@ -173,6 +173,7 @@ func TestComputeDiagnosisCauses(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tc.wantTop, d.TopCause.Name, "TopCause.Name")
+			assert.NotEmpty(t, d.TopCause.Summary, "TopCause.Summary")
 			assert.NotEmpty(t, d.TopCause.Evidence, "TopCause.Evidence")
 			assert.NotEmpty(t, d.TopCause.Falsifier, "TopCause.Falsifier")
 			assert.NotEmpty(t, d.Why, "Why")

@@ -28,6 +28,7 @@ func causeMemory(p diagnosisParams, win, base fleetResources) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "Memory pressure is elevated: the service is allocating and garbage-collecting more than usual, which slows request handling."
 	if leak {
 		c.dotClass = "dot-err"
 	}
@@ -82,6 +83,7 @@ func causeCPU(win fleetResources) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "CPU is near its configured capacity: there isn't much headroom left before the service becomes compute-bound."
 	c.signals = 1
 	c.mag = ratio
 	c.evidence = []string{
@@ -113,6 +115,7 @@ func causeCongestion(win, base fleetResources, ds downstreamView) cause {
 	}
 
 	c.fired = true
+	c.summary = "Requests are waiting on internal contention (connections, worker pool, or similar), not because the CPU or memory is busy: blocked, not busy."
 	c.signals = 2 // self-dominant + compute-flat: the "blocked, not busy" shape
 	c.evidence = []string{
 		"Self-time dominates (downstream " + fmtPctD(ds.DownFraction) + ") while CPU and GC held flat vs baseline — blocked, not busy.",
@@ -167,6 +170,7 @@ func causeOverload(p diagnosisParams, win, base fleetResources) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "A significant share of requests are timing out or being canceled, typically from a load spike or an aggressive timeout setting."
 	c.signals = 1
 	c.mag = share
 	c.evidence = []string{
@@ -189,6 +193,7 @@ func causeGoroutineLeak(win, base fleetResources) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "The goroutine count keeps climbing and isn't coming back down, usually a sign that something isn't being cleaned up."
 	c.signals = 2
 	c.mag = float64(win.goroutines) / float64(base.goroutines)
 	c.evidence = []string{
@@ -206,6 +211,7 @@ func causeDownstream(ds downstreamView) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "Most of the request time is spent waiting on a downstream dependency (a database, cache, or external API), not on this endpoint's own work."
 	c.signals = 1
 	c.mag = ds.DownFraction * 6
 	c.evidence = []string{
@@ -245,6 +251,7 @@ func causeInstanceLocalized(instances []instanceStatRow) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "The slowdown is concentrated on one instance rather than the whole fleet, likely a bad host, a hot shard, or uneven load balancing."
 	c.signals = 1
 	if fleetMed > 0 {
 		c.mag = worst.P95 / fleetMed
@@ -289,6 +296,7 @@ func causeRelease(versions []storage.VersionStat) cause {
 		return c
 	}
 	c.fired = true
+	c.summary = "One deployed version is measurably slower than another, consistent with a release regression rather than a resource or dependency issue."
 	c.signals = 1
 	c.mag = ratio
 	c.evidence = []string{

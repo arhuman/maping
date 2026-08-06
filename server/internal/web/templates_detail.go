@@ -62,6 +62,7 @@ const tplDetailHTML = `
       <span style="font:700 15px var(--ui);flex-shrink:0;">{{.Diagnosis.TopCause.Name}}</span>
       {{if .Diagnosis.TopCause.Confidence}}<span style="font:600 10px var(--mono);color:var(--txt-3);border:1px solid var(--line);border-radius:6px;padding:2px 7px;flex-shrink:0;letter-spacing:.4px;">{{.Diagnosis.TopCause.Confidence}}</span>{{end}}
     </div>
+    {{if .Diagnosis.TopCause.Summary}}<div style="font:500 12.5px var(--ui);color:var(--txt-2);margin-bottom:10px;">{{.Diagnosis.TopCause.Summary}}</div>{{end}}
     {{if .Diagnosis.Scope}}<div style="font:500 11.5px var(--mono);color:var(--txt-3);margin-bottom:12px;">Scope: {{.Diagnosis.Scope}}</div>{{end}}
     {{if .Diagnosis.TopCause.Evidence}}
     <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
