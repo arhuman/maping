@@ -1,6 +1,6 @@
 # mAPI-ng
 
-**mAPI-ng** (monitored API, NextGen): evidence-backed incident diagnosis for Go APIs.
+**mAPI-ng** (monitored API, NextGen): evidence-backed incident diagnosis for APIs, starting with Go.
 
 Open source. Start free on the [hosted service](https://www.mapi-ng.com) (no card), or self-host the complete MIT stack.
 
@@ -30,10 +30,13 @@ connection and pool congestion, overload and timeouts, goroutine leak, downstrea
 instance-localized, release regression), each with its evidence and what would rule it out.
 Confidence is a discrete tier (High, Medium, Low), never a percentage.
 
-**Simplicity.** Go-specialized. One recorder, one middleware, one
-required input (`MAPING_KEY`); everything else is inferred: service name from the binary,
-instance from the hostname, flush timing and sketch parameters from defaults. No Prometheus,
-Grafana, or YAML to operate.
+**Simplicity.** Runtime-aware. One recorder, one middleware, one
+required input (`MAPING_KEY`) in every client; everything else is inferred: service name from
+the binary, instance from the hostname, flush timing and sketch parameters from defaults. Go is
+first-class today; a wire-compatible Python (FastAPI/Starlette) client is in beta, matching RED
+metrics exactly while approximating Go-runtime-specific signals. The collector and protocol are
+language-agnostic; some diagnosis rules are still Go-shaped. No Prometheus, Grafana, or YAML to
+operate.
 
 **Efficiency.** The client aggregates per-endpoint metrics in-process into a
 DDSketch before sending. The server stores compact Summaries in ClickHouse and rolls them up
@@ -47,7 +50,8 @@ and queried data compared with raw-event collection.
 mAPI-ng targets the onboarding, interpretation, and operational cost pain of the OTel +
 Prometheus + Grafana stack, not its flexibility. It does not replace full distributed tracing
 or custom dashboards. It gives you RED metrics (rate, errors, duration) and a ranked,
-evidence-backed diagnosis for every Go HTTP endpoint, from a few lines of instrumentation.
+evidence-backed diagnosis for every instrumented HTTP endpoint, from a few lines of
+instrumentation.
 
 For the full product framing, design decisions, and terminology, see [`docs/context.md`](docs/context.md).
 
@@ -99,6 +103,30 @@ export MAPING_KEY=your-ingest-key   # the only required input; absent = no-op
 ```
 
 **Full details:** [`client/README.md`](client/README.md), [`server/README.md`](server/README.md), [`proto/README.md`](proto/README.md)
+
+**Instrument a Python service (Beta):**
+
+```bash
+pip install maping-client
+```
+
+```python
+from maping import Recorder
+from maping.asgi import MapingMiddleware
+
+recorder = Recorder()                      # reads MAPING_KEY from env
+app = MapingMiddleware(fastapi_app, recorder=recorder)  # wrap the whole ASGI app
+```
+
+```bash
+export MAPING_KEY=your-ingest-key   # the only required input; absent = no-op
+```
+
+FastAPI/Starlette via ASGI middleware. RED metrics match the Go client's wire contract exactly;
+runtime signals (CPU, memory, GC) are best-effort approximations of the Go-runtime concepts they
+mirror. No per-framework adapters yet beyond ASGI.
+
+**Full details:** [`arhuman/maping-python`](https://github.com/arhuman/maping-python)
 
 ---
 
