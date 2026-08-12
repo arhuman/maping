@@ -7,13 +7,21 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/arhuman/maping/proto/token"
 )
 
-// defaultEndpoint is the baked-in hosted collector URL. Placeholder for M1.
-const defaultEndpoint = "https://ingest.maping.dev"
+// defaultEndpoint is the baked-in hosted collector URL for the mAPI-ng hosted
+// service.
+const defaultEndpoint = "https://www.mapi-ng.com"
+
+// trustedKeyOriginDomain is the registrable domain a key-embedded origin must
+// match (or be a subdomain of) to be used without an explicit operator
+// opt-in (see originIsTrusted). Derived from defaultEndpoint's own host
+// rather than a second hardcoded string, so the two can never drift apart.
+var trustedKeyOriginDomain = registrableDomain(defaultEndpoint)
 
 // defaultFlushWindow is the accumulation interval before a Summary is shipped.
 const defaultFlushWindow = 10 * time.Second
@@ -120,10 +128,15 @@ func resolveConfig(opts []Option) Config {
 
 // resolveEndpoint applies the collector-URL precedence. The ingest key may embed
 // the deployment origin (mk_live_<origin>.<secret>), which lets a single
-// MAPING_KEY configure both credential and endpoint — but only when no explicit
-// endpoint (option or env) is set, and only if the embedded origin is a valid
-// http(s) URL. A malformed or non-http origin falls back to the default rather
-// than pointing telemetry somewhere unexpected.
+// MAPING_KEY configure both credential and endpoint, but only when no explicit
+// endpoint (option or env) is set, only if the embedded origin is a valid
+// http(s) URL, and only if that origin is under the trusted hosted-service
+// domain (or the operator has opted in via MAPING_TRUST_KEY_ORIGIN). An
+// operator-supplied endpoint (option or env var) is never subject to this
+// restriction: it is the operator's own explicit choice, not a claim embedded
+// in a secret from an unverified source (see originIsTrusted). A malformed,
+// non-http, or untrusted origin falls back to the default rather than
+// pointing telemetry somewhere unexpected.
 func resolveEndpoint(optEndpoint, envEndpoint, key string) string {
 	if optEndpoint != "" {
 		return optEndpoint
@@ -132,7 +145,13 @@ func resolveEndpoint(optEndpoint, envEndpoint, key string) string {
 		return envEndpoint
 	}
 	if origin, _, ok := token.Decode(key); ok && validOrigin(origin) {
-		return origin
+		if originIsTrusted(origin) {
+			return origin
+		}
+		slog.Warn(
+			"maping: key-embedded endpoint is outside the trusted domain, ignoring it and using the default endpoint instead",
+			"origin", origin, "trusted_domain", trustedKeyOriginDomain,
+		)
 	}
 	return defaultEndpoint
 }
@@ -148,6 +167,44 @@ func validOrigin(origin string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// originIsTrusted reports whether a key-embedded origin may be used without
+// an explicit operator opt-in. Closes the gap where a compromised or
+// untrusted MAPING_KEY could otherwise silently redirect the Bearer secret
+// and all telemetry to an attacker-chosen host with no allow-list at all: a
+// syntactically valid http(s) URL alone (validOrigin) says nothing about who
+// controls that host. Set MAPING_TRUST_KEY_ORIGIN=1 (or true/yes) to trust
+// any embedded origin anyway, e.g. for a self-hosted deployment whose keys
+// embed a private domain.
+func originIsTrusted(origin string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MAPING_TRUST_KEY_ORIGIN"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == trustedKeyOriginDomain || strings.HasSuffix(host, "."+trustedKeyOriginDomain)
+}
+
+// registrableDomain returns the last two dot-separated labels of endpoint's
+// host (e.g. "www.mapi-ng.com" -> "mapi-ng.com"), used as the trust boundary
+// for key-embedded origins so any subdomain of the hosted service is
+// trusted, not just its exact host.
+func registrableDomain(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return host
+	}
+	return strings.Join(labels[len(labels)-2:], ".")
 }
 
 // deriveService resolves the service name: MAPING_SERVICE → OTEL_SERVICE_NAME →

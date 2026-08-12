@@ -81,18 +81,31 @@ func TestResolveConfigPrecedence(t *testing.T) {
 			wantSvc: "otel",
 		},
 		{
-			name:    "key-embedded origin used when no endpoint set",
+			name:    "trusted key-embedded origin used when no endpoint set",
+			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.mapi-ng.com", "sec")},
+			wantEnd: "https://collector.mapi-ng.com",
+		},
+		{
+			name:    "untrusted key-embedded origin falls back to default",
 			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.example.com", "sec")},
+			wantEnd: defaultEndpoint,
+		},
+		{
+			name: "untrusted key-embedded origin used when MAPING_TRUST_KEY_ORIGIN set",
+			env: map[string]string{
+				"MAPING_KEY":              token.Encode("https://collector.example.com", "sec"),
+				"MAPING_TRUST_KEY_ORIGIN": "1",
+			},
 			wantEnd: "https://collector.example.com",
 		},
 		{
 			name:    "MAPING_ENDPOINT beats key-embedded origin",
-			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.example.com", "sec"), "MAPING_ENDPOINT": "https://env"},
+			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.mapi-ng.com", "sec"), "MAPING_ENDPOINT": "https://env"},
 			wantEnd: "https://env",
 		},
 		{
 			name:    "WithEndpoint beats key-embedded origin",
-			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.example.com", "sec")},
+			env:     map[string]string{"MAPING_KEY": token.Encode("https://collector.mapi-ng.com", "sec")},
 			opts:    []Option{WithEndpoint("https://code")},
 			wantEnd: "https://code",
 		},

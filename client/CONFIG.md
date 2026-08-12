@@ -23,12 +23,28 @@ r.Use(maping.Middleware(
 | Setting | Code option | Env var | Default | Required |
 |---|---|---|---|---|
 | Ingest key | `WithKey` | `MAPING_KEY` | *(none)* | **Yes to activate.** Absent ⇒ no-op recorder. |
-| Endpoint | `WithEndpoint` | `MAPING_ENDPOINT` | hosted collector URL (baked in) | No |
+| Endpoint | `WithEndpoint` | `MAPING_ENDPOINT` | trusted key-embedded origin, else hosted collector URL (baked in) | No |
 | Service name | `WithService` | `MAPING_SERVICE` | derived: `OTEL_SERVICE_NAME` → binary name (`os.Args[0]`) | No |
 | Instance id | `WithInstance` | `MAPING_INSTANCE` | derived: `HOSTNAME`/pod name → OS hostname | No |
 | Flush window | `WithFlushWindow` | `MAPING_FLUSH_SECONDS` | 10s | No |
 
 The key **encodes the tenant** (Q5); the client never configures a tenant id.
+
+### Endpoint precedence (full)
+
+`WithEndpoint` > `MAPING_ENDPOINT` > key-embedded origin (if trusted) > default.
+
+The ingest key may embed the collector origin (`mk_live_<origin>.<secret>`),
+letting a single `MAPING_KEY` configure both credential and endpoint: the
+normal zero-config path for the hosted service, since a hosted key always
+embeds a hosted origin. That embedded origin is used only when no explicit
+endpoint (option or env) is set, only if it is a valid `http(s)` URL, and
+only if it is under the trusted hosted-service domain; otherwise the client
+logs one `Warn` and falls back to the default endpoint. Set
+`MAPING_TRUST_KEY_ORIGIN=1` to trust an embedded origin outside that domain
+anyway (e.g. a self-hosted deployment whose own keys embed a private
+domain). An operator-supplied endpoint (option or env var) is never subject
+to this check: it is always used as given.
 
 ## TLS / endpoint rules
 
