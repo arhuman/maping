@@ -54,4 +54,4 @@ records that seam.
   should move to a context struct; deferred, not done here.
 - "Disk" remains an estimate by construction: `summaries` is partitioned by day, not by
   tenant, so per-tenant on-disk bytes are not directly measurable. It must never be
-  presented as a billing figure.
+  presented as a figure customers are charged against.
