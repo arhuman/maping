@@ -125,6 +125,26 @@ jobs:
       - name: Audit (verify + lint + vuln, all modules)
         run: make audit
 
+  # Supply-chain gate: Trivy over the working tree. It covers what govulncheck
+  # cannot: advisories against declared module versions regardless of call path,
+  # Dockerfile misconfiguration (a root runtime user is a HIGH here), and secrets
+  # committed by accident. Unfixed advisories are ignored so the gate stays
+  # actionable: it only fails on findings with a released fix.
+  scan:
+    name: supply chain scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy (vuln + misconfig + secret)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
   # Integration gate: exercises the real ClickHouse writer/query layer and the
   # Postgres-backed control-plane store (the `//go:build integration` tests)
   # against live instances, so both critical paths are covered automatically.
