@@ -37,6 +37,7 @@ We welcome pull requests! If you'd like to contribute code, please follow these 
     ```bash
     make audit
     ```
+    This also enforces the coverage floor (`make cover`): every module except `proto/` must stay at or above `COVER_MIN` (70%), so new code needs tests before it can land.
 6.  **Tidy your modules.** Make sure all `go.mod` files are up-to-date:
     ```bash
     make tidy
