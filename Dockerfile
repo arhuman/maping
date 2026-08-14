@@ -43,6 +43,12 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /out/maping-server .
 
+# Run as an unprivileged uid. Group 0 ownership plus g=u permissions keep the
+# image usable under OpenShift, which ignores USER and assigns an arbitrary uid
+# that is always a member of group 0.
+RUN chown -R 1001:0 /app && chmod -R g=u /app
+USER 1001
+
 # Dashboard (HTTP/1) + ingest (h2c gRPC) share this port; see MAPING_LISTEN.
 EXPOSE 8080
 
