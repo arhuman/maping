@@ -58,6 +58,13 @@ LDFLAGS       := -s -w -X $(VERSION_PKG).Version=$(BUILD_VERSION) -X $(VERSION_P
 
 LINE_LIMIT ?= 500
 
+# Coverage floor enforced by `make cover`, which `make audit` depends on, so the
+# number lives in exactly one place. proto/ is exempt: it is dominated by
+# generated .pb.go/.connect.go stubs no test executes, so its total (~8%) says
+# nothing about its handwritten packages, which are above 90%.
+COVER_MIN     ?= 70
+COVER_MODULES := $(filter-out proto,$(MODULES))
+
 # Rounds of sample requests fired by `make generate-traffic` (one round hits
 # every example route once).
 ROUNDS ?= 20
@@ -65,7 +72,7 @@ ROUNDS ?= 20
 # ==================================================================================== #
 # PHONY DECLARATIONS (in alphabetical order)
 # ==================================================================================== #
-.PHONY: audit build checklen confirm down generate-traffic help integration local logs proto release restart test tidy tools up
+.PHONY: audit build checklen confirm cover down generate-traffic help integration local logs preflight proto release restart test tidy tools up
 
 # ==================================================================================== #
 # STANDARD TARGETS (in alphabetical order)
@@ -77,6 +84,21 @@ audit:
 	@which golangci-lint > /dev/null || $(MAKE) tools
 	@which govulncheck > /dev/null || $(MAKE) tools
 	@for m in $(MODULES); do echo "== audit $$m =="; (cd $$m && go mod verify && golangci-lint run ./... && govulncheck ./...) || exit 1; done
+	@$(MAKE) cover
+
+## cover: fail if any module's total test coverage is below COVER_MIN percent
+cover:
+	@fail=""; \
+	for m in $(COVER_MODULES); do \
+		prof=$$(mktemp); \
+		(cd $$m && go test -short -coverprofile=$$prof ./... >/dev/null 2>&1) || { echo "tests failed in $$m" >&2; rm -f $$prof; exit 1; }; \
+		pct=$$(go tool cover -func=$$prof 2>/dev/null | awk '/^total:/{print $$3}' | tr -d '%'); \
+		rm -f $$prof; \
+		[ -n "$$pct" ] || pct=0; \
+		echo "$$m $$pct%"; \
+		awk "BEGIN{exit !($$pct < $(COVER_MIN))}" && fail="$$fail  $$m ($$pct%)\n"; \
+	done; \
+	if [ -n "$$fail" ]; then printf "coverage below COVER_MIN=$(COVER_MIN)%%:\n$$fail" >&2; exit 1; fi
 
 ## build: build the server binary
 build:
@@ -183,8 +205,21 @@ local: $(ENV_FILE)
 	@set -a; [ -f $(ENV_FILE) ] && . ./$(ENV_FILE) >/dev/null 2>&1; set +a; \
 		echo "Local stack up — dashboard http://localhost:$${MAPING_PORT:-8080}"
 
+## preflight: refuse to start production on a missing .env or env.sample defaults
+preflight:
+	@test -f $(ENV_FILE) || { echo "$(ENV_FILE) is missing: cp env.sample .env and fill the production secrets first" >&2; exit 1; }
+	@set -a; . ./$(ENV_FILE) >/dev/null 2>&1; set +a; \
+		bad=""; \
+		[ $${#MAPING_SESSION_KEY} -ge 32 ] || bad="$$bad  MAPING_SESSION_KEY: empty or under 32 bytes, sessions cannot be signed\n"; \
+		[ -n "$$MAPING_POSTGRES_DSN" ] || bad="$$bad  MAPING_POSTGRES_DSN: empty, prod would run as a single unauthenticated tenant\n"; \
+		[ "$$MAPING_PG_PASSWORD" != maping ] || bad="$$bad  MAPING_PG_PASSWORD: still the env.sample value\n"; \
+		[ "$$MAPING_CH_PASSWORD" != maping ] || bad="$$bad  MAPING_CH_PASSWORD: still the env.sample value\n"; \
+		case "$$MAPING_BASE_URL" in https://*) ;; *) bad="$$bad  MAPING_BASE_URL: not an https:// URL, session cookies stay insecure\n";; esac; \
+		if [ -n "$$bad" ]; then printf "refusing to start production, unsafe $(ENV_FILE):\n$$bad" >&2; exit 1; fi
+	@echo "preflight OK"
+
 ## up: start the full production stack (only the server port published)
-up: $(ENV_FILE)
+up: preflight
 	$(PROD_COMPOSE) up -d --build
 	@echo "Production stack up."
 
