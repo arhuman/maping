@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 
 # Runtime stage — the binary is self-contained (templates are Go string
 # literals, Postgres migrations are go:embed), so no external assets are needed.
-FROM alpine:3.19
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata
 
