@@ -1,0 +1,49 @@
+# Dependency updates. The repo is a Go workspace, so gomod is declared per
+# module directory: dependabot resolves one go.mod at a time and does not read
+# go.work. Updates are grouped so a shared bump lands as one PR per module
+# instead of one per dependency.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - /proto
+      - /client
+      - /client/gin
+      - /client/nethttp
+      - /client/echo
+      - /client/chi
+      - /client/beego
+      - /server
+      - /example
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore

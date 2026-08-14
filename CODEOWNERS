@@ -1,0 +1,12 @@
+# Review routing. The last matching pattern wins, so the catch-all comes first.
+* @arhuman
+
+# Architecture decisions and the public wire format: changes here bind every
+# downstream consumer, so they are never merged without an owner's review.
+/docs/adr/ @arhuman
+/proto/ @arhuman
+
+# Supply chain and release surface.
+/.github/ @arhuman
+/Dockerfile @arhuman
+/Makefile @arhuman
