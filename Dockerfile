@@ -13,6 +13,12 @@ ENV GOPROXY=https://proxy.golang.org,direct \
 
 WORKDIR /build
 
+# Build-time identity linked into the binary (see server/internal/version). The
+# compose stacks leave these at their defaults; `make release` and CI pass the
+# real values, so an unstamped image still reports something honest.
+ARG BUILD_VERSION=dev
+ARG BUILD_COMMIT=none
+
 # The workspace pins four modules; the server binary needs proto (via a replace
 # directive) and pulls its sums from go.work.sum. Copy the whole workspace so
 # the build matches `make build` exactly. Cache mounts persist the module cache
@@ -28,7 +34,10 @@ COPY example ./example
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     for i in 1 2 3 4 5; do \
-        CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" \
+        CGO_ENABLED=0 GOOS=linux go build -trimpath \
+            -ldflags="-w -s \
+                -X github.com/arhuman/maping/server/internal/version.Version=${BUILD_VERSION} \
+                -X github.com/arhuman/maping/server/internal/version.Commit=${BUILD_COMMIT}" \
             -o /out/maping-server ./server/cmd/maping-server && break; \
         echo "build attempt $i failed; retrying in 5s..."; sleep 5; \
     done; \

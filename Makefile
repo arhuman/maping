@@ -45,6 +45,17 @@ ADAPTERS := gin nethttp echo chi beego
 # Release version for `make release VERSION=vX.Y.Z` (path-prefixed tags per module).
 VERSION ?=
 
+# Build-time identity linked into the server binary. Distinct from VERSION
+# above: that one drives release tagging, these describe whatever tree is being
+# compiled right now, so an untagged dev build still identifies itself.
+VERSION_PKG   := github.com/arhuman/maping/server/internal/version
+# Tags are path-prefixed per module (server/vX.Y.Z), so describe must match only
+# the server's own tags: a bare --tags would report whichever module was tagged
+# last, e.g. client/beego/v0.12.0, as the server's version.
+BUILD_VERSION ?= $(shell git describe --tags --match 'server/v*' --always --dirty 2>/dev/null | sed 's|^server/||' || echo dev)
+BUILD_COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS       := -s -w -X $(VERSION_PKG).Version=$(BUILD_VERSION) -X $(VERSION_PKG).Commit=$(BUILD_COMMIT)
+
 LINE_LIMIT ?= 500
 
 # Rounds of sample requests fired by `make generate-traffic` (one round hits
@@ -69,7 +80,7 @@ audit:
 
 ## build: build the server binary
 build:
-	CGO_ENABLED=0 GOFLAGS="-ldflags=-s -ldflags=-w" go build -o bin/$(BINARY_NAME) ./server/cmd/maping-server
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME) ./server/cmd/maping-server
 
 ## checklen: fail if any non-generated, non-test Go source file exceeds LINE_LIMIT lines
 checklen:

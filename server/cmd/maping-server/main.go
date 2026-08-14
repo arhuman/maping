@@ -12,13 +12,19 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/arhuman/maping/server/app"
+	"github.com/arhuman/maping/server/internal/version"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println(version.String())
+		return
+	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if err := app.Run(log); err != nil {
 		log.Error("server exited with error", slog.Any("err", err))
