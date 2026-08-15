@@ -24,8 +24,8 @@ jobs:
       matrix:
         go: ["1.26.5", "stable"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Conventional Commits on PR commits
@@ -71,7 +71,7 @@ jobs:
     name: license
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Every module ships a LICENSE file
         run: |
           set -euo pipefail
@@ -95,7 +95,7 @@ jobs:
     name: public tree hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: No hosted-service vocabulary in the public tree
         run: |
           set -euo pipefail
@@ -114,8 +114,8 @@ jobs:
     name: lint + vuln
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: Install golangci-lint (pinned)
@@ -134,7 +134,7 @@ jobs:
     name: supply chain scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Trivy (vuln + misconfig + secret)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -181,8 +181,8 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: Storage and control-plane integration tests
