@@ -8,16 +8,20 @@ Every module in the workspace (`proto`, `client`, the client adapters, and
 `server`) is released at the same version and tagged per module as
 `<module>/vX.Y.Z`, so `client/v0.12.0` and `server/v0.12.0` are the same release.
 
-## [Unreleased]
+## [0.13.0] - 2026-08-15
 
 ### Added
+- Ranked diagnosis causes carry a plain-language summary.
 - `maping-server --version` prints the version and commit linked into the binary.
 - `make cover` enforces a single coverage floor (`COVER_MIN`), and `make audit` depends on it.
 - `make preflight` gates `make up`, refusing to start production when `.env` is missing or still carries `env.sample` defaults.
 
+### Changed
+- The client accepts a key-embedded origin only under the hosted `mapi-ng.com` domain, and otherwise falls back to the default endpoint. Self-hosted deployments whose keys embed a private domain must set `MAPING_TRUST_KEY_ORIGIN=1`.
+- The runtime container image runs as unprivileged uid 1001 instead of root. Volumes written by an earlier image may need their ownership adjusted.
+
 ### Fixed
-- The runtime container image runs as an unprivileged user instead of root.
-- The client no longer falls back to an unreachable default ingest endpoint, and accepts a key-embedded origin only under the hosted domain unless `MAPING_TRUST_KEY_ORIGIN` is set.
+- The client default endpoint pointed at an unreachable host. It is now `https://www.mapi-ng.com`.
 
 ## [0.12.0] - 2026-07-25
 
@@ -101,7 +105,8 @@ Every module in the workspace (`proto`, `client`, the client adapters, and
 ### Added
 - First tagged release of the workspace modules.
 
-[Unreleased]: https://github.com/arhuman/maping/compare/server/v0.12.0...HEAD
+[Unreleased]: https://github.com/arhuman/maping/compare/server/v0.13.0...HEAD
+[0.13.0]: https://github.com/arhuman/maping/compare/server/v0.12.0...server/v0.13.0
 [0.12.0]: https://github.com/arhuman/maping/compare/server/v0.11.0...server/v0.12.0
 [0.11.0]: https://github.com/arhuman/maping/compare/server/v0.10.0...server/v0.11.0
 [0.10.0]: https://github.com/arhuman/maping/compare/server/v0.9.0...server/v0.10.0
