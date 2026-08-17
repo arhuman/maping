@@ -5,13 +5,13 @@ go 1.26.5
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/net v0.57.0
+	golang.org/x/net v0.58.0
 )
 
 require (
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
