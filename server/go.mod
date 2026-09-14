@@ -3,14 +3,14 @@ module github.com/arhuman/maping/server
 go 1.26.5
 
 require (
-	connectrpc.com/connect v1.20.0
+	connectrpc.com/connect v1.21.0
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/arhuman/maping/proto v0.13.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/stretchr/testify v1.12.1
 	github.com/yuin/goldmark v1.8.6
-	golang.org/x/oauth2 v0.36.0
-	golang.org/x/time v0.15.0
+	golang.org/x/oauth2 v0.37.0
+	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 )
 
