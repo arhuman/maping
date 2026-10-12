@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	connectrpc.com/connect v1.21.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (
