@@ -3,7 +3,7 @@ module github.com/arhuman/maping/example
 go 1.26.5
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
+	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
 	github.com/arhuman/maping/client v0.13.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/stretchr/testify v1.12.1
@@ -14,7 +14,7 @@ require go.yaml.in/yaml/v3 v3.0.5 // indirect
 require (
 	connectrpc.com/connect v1.21.0 // indirect
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
-	github.com/andybalholm/brotli v1.2.2 // indirect
+	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/arhuman/maping/client/gin v0.0.0
 	github.com/arhuman/maping/proto v0.13.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -49,11 +49,11 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
-	go.opentelemetry.io/otel v1.44.0 // indirect
-	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
