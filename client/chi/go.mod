@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/arhuman/maping/client v0.13.0
 	github.com/arhuman/maping/proto v0.13.0
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/stretchr/testify v1.12.1
 )
 
