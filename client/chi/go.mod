@@ -5,15 +5,15 @@ go 1.26.5
 require (
 	github.com/arhuman/maping/client v0.13.0
 	github.com/arhuman/maping/proto v0.13.0
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/stretchr/testify v1.12.1
 )
 
 require (
-	connectrpc.com/connect v1.21.0 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	connectrpc.com/connect v1.21.1 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
