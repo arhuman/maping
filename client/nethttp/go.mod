@@ -9,10 +9,10 @@ require (
 )
 
 require (
-	connectrpc.com/connect v1.21.0 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	connectrpc.com/connect v1.21.1 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
