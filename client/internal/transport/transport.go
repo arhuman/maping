@@ -47,12 +47,16 @@ func New(endpoint, key string) (*Client, error) {
 	switch u.Scheme {
 	case "https":
 		httpClient = &http.Client{
-			Timeout:   httpClientTimeout,
+			Timeout: httpClientTimeout,
+			//nolint:staticcheck // x/net/http2.Transport is deprecated in favor of stdlib
+			// http.Transport, which does not expose the H2C dialing knobs the http://
+			// branch below needs. Revisit once stdlib exposes an equivalent.
 			Transport: &http2.Transport{},
 		}
 	case "http":
 		httpClient = &http.Client{
 			Timeout: httpClientTimeout,
+			//nolint:staticcheck // see the https branch above
 			Transport: &http2.Transport{
 				AllowHTTP: true,
 				DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {

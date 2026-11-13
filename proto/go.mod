@@ -3,8 +3,8 @@ module github.com/arhuman/maping/proto
 go 1.26.5
 
 require (
-	connectrpc.com/connect v1.21.0
-	github.com/klauspost/compress v1.20.1
+	connectrpc.com/connect v1.21.1
+	github.com/klauspost/compress v1.20.3
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12
 )
